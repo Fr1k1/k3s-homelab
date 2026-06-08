@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: getreeba
+  namespace: default
+spec:
+  selector:
+    app: getreeba
+  ports:
+    - port: 80
+      targetPort: 8000
