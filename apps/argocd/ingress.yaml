@@ -3,9 +3,9 @@ kind: Ingress
 metadata:
   name: argocd-ingress
   namespace: argocd
-annotations:
-  traefik.ingress.kubernetes.io/router.entrypoints: web
-  argocd.argoproj.io/server-insecure: "true"
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    argocd.argoproj.io/server-insecure: "true"
 spec:
   rules:
     - host: argocd.homelab.local
