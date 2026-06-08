@@ -13,6 +13,8 @@ spec:
       labels:
         app: getreeba
     spec:
+      imagePullSecrets:
+        - name: ghcr-secret
       containers:
         - name: getreeba
           image: ghcr.io/fosleen/getreeba:latest
