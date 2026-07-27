@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vjencanja-backend-ingress
+  namespace: default
+spec:
+  rules:
+    - host: vjencanja-backend.homelab.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vjencanja-backend
+                port:
+                  number: 80
+    - host: api.vjenchanje.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vjencanja-backend
+                port:
+                  number: 80

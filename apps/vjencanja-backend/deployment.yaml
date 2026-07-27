@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vjencanja-backend
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vjencanja-backend
+  template:
+    metadata:
+      labels:
+        app: vjencanja-backend
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: vjencanja-backend
+          image: ghcr.io/fosleen/vjencanja-backend:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: vjencanja-backend-secret

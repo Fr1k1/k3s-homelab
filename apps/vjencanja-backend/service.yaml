@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: vjencanja-backend
+  namespace: default
+spec:
+  selector:
+    app: vjencanja-backend
+  ports:
+    - port: 80
+      targetPort: 8000
