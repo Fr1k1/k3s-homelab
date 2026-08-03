@@ -6,24 +6,47 @@ Run them once, by hand, against the live cluster - they are not GitOps
 managed (same bootstrap category as the Sealed Secrets controller's own
 key: something has to exist before GitOps can manage anything else).
 
-## 1. Apply the ArgoCD Application manifest
+## 1. Hand `apps/vjencanja-backend/` off to its own Application
 
-The `vjencanja-backend` Application currently exists in the cluster only
-imperatively (created by hand, no annotations). Reconcile it onto the
-git-defined version, which carries the Image Updater annotations:
+There is no per-service ArgoCD Application in this cluster — only one
+umbrella `homelab` Application (`source.directory.recurse: true` over the
+whole `apps/` path), which applies every file it finds as a raw manifest.
+It has no idea what a `kustomization.yaml` is, so left alone it tries to
+`kubectl apply` that file directly and fails outright (`Kubernetes API
+could not find kustomize.config.k8s.io/Kustomization`) — which blocks its
+*entire* sync, not just this one resource.
 
-    kubectl apply -f apps/vjencanja-backend/application.yaml
+So `apps/vjencanja-backend/` needs to be carved out from `homelab`'s direct
+management and handed to its own child Application instead. That's why the
+Application manifest itself lives at `apps/applications/vjencanja-backend.yaml`
+— a sibling location `homelab` still applies directly — rather than inside
+`apps/vjencanja-backend/` alongside the files it's taking over.
 
-(`kubectl apply` on a resource with no prior `last-applied-configuration`
-annotation will print a one-time warning — that's expected and harmless.)
+Exclude the directory from `homelab`'s recursive scan:
 
-This file is intentionally NOT included in `kustomization.yaml` — it's the
-Application resource itself, not something the app it points at should
-manage.
+    kubectl patch application homelab -n argocd --type merge \
+      -p '{"spec":{"source":{"directory":{"recurse":true,"exclude":"vjencanja-backend/**"}}}}'
+
+Confirm it took (look for an `exclude:` line under `spec.source.directory`):
+
+    kubectl get application homelab -n argocd -o yaml | grep -A3 "directory:"
+
+Commit and push the relocated `apps/applications/vjencanja-backend.yaml` (removed
+from `apps/vjencanja-backend/`) to `k3s-homelab`'s `master` branch, if you
+haven't already. Once `homelab` re-syncs (automated, or force it with
+`kubectl patch application homelab -n argocd --type merge -p '{"operation":{"sync":{}}}'`),
+it picks up the relocated file and creates the `vjencanja-backend`
+Application — which *does* correctly auto-detect `kustomization.yaml`,
+since it sits directly at that child Application's own `source.path`.
+
+The previously-existing `vjencanja-backend` Deployment/Service/Ingress/SealedSecret
+(currently managed directly by `homelab`) get silently re-labeled to the new
+child Application on its first sync — expected, not destructive; they're
+the same live objects, just changing which Application tracks them.
 
 ## 2. Install Argo CD Image Updater
 
-This project's Application annotations (see apps/vjencanja-backend/application.yaml)
+This project's Application annotations (see apps/applications/vjencanja-backend.yaml)
 use the pre-1.0 annotation-based configuration format. Image Updater 1.0+ moved
 config to a separate ImageUpdater CRD and only honors annotations via a deprecated
 compatibility flag - so this MUST be pinned to the latest pre-1.0 release, not
