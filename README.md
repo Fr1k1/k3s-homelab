@@ -93,7 +93,7 @@ ArgoCD, the Sealed Secrets controller, and `kube-prometheus-stack` are installed
 
 Actively planned next steps, in priority order:
 
-1. **Automated image promotion** — wire up Argo CD Image Updater (or CI-driven tag bumps) so a new container build flows through to the cluster without a manual restart.
+1. ~~Automated image promotion~~ — done via Argo CD Image Updater (digest strategy, git write-back). See `apps/vjencanja-backend/SETUP.md` for the one-time bootstrap and `vjencanja`'s `.github/workflows/api-deploy.yml` for the CI side.
 2. **TLS via cert-manager** — issue certs for all ingress hosts and drop the current homelab-only HTTP setup.
 3. **Shared Helm chart for app workloads** — `getreeba` and `vjencanja-backend` are structurally identical; templatizing them removes duplication as more services are added.
 4. **High availability** — multi-replica deployments with `PodDisruptionBudget`s once the cluster has more than one node.
