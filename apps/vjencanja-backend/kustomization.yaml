@@ -7,4 +7,4 @@ resources:
   - sealed-secret.yaml
 images:
   - name: ghcr.io/fosleen/vjencanja-backend
-    digest: sha256:8913312978569de1097a40cddb51487c99aec9683aea716186694dc248a54266
+    digest: sha256:a362118b806d6112b79feb45ad75c2a9f4ce97b19146427e3509a05e2576ac3e
