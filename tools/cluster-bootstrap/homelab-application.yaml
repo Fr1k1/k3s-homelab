@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: homelab
+  namespace: argocd
+spec:
+  destination:
+    namespace: default
+    server: https://kubernetes.default.svc
+  project: default
+  source:
+    directory:
+      exclude: vjencanja-backend/**
+      recurse: true
+    path: apps
+    repoURL: https://github.com/Fr1k1/k3s-homelab
+    targetRevision: master
+  syncPolicy:
+    automated:
+      enabled: true
+      prune: false
+      selfHeal: true
