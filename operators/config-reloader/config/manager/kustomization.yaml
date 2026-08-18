@@ -1,0 +1,12 @@
+# The `images:` override below is the manual-tag-bump mechanism (a
+# deliberate choice — no Argo CD Image Updater wired up for this
+# controller's own image, since it's expected to change rarely after the
+# initial build). Editing `newTag` here and pushing is the entire release
+# process for a new build of the controller: same kustomize `images:`
+# transformer apps/vjencanja-backend/kustomization.yaml uses for its own
+# image, just updated by hand here instead of by Image Updater.
+resources:
+  - manager.yaml
+images:
+  - name: ghcr.io/fr1k1/config-reloader
+    newTag: latest

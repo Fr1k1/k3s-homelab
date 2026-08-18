@@ -1,0 +1,7 @@
+# Bundles the ClusterRole, its binding, and the ServiceAccount they
+# both reference into one Kustomize base that config/default combines
+# with ../crd and ../manager.
+resources:
+  - role.yaml
+  - role_binding.yaml
+  - service_account.yaml

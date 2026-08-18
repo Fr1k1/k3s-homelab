@@ -1,0 +1,16 @@
+# The ClusterRole above grants permissions to a *role*; this is what
+# actually attaches those permissions to *this controller's identity*
+# (the ServiceAccount in service_account.yaml). Without this binding, the
+# generated role.yaml would exist in the cluster but grant nobody anything.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: manager-role
+subjects:
+  - kind: ServiceAccount
+    name: controller-manager
+    namespace: system

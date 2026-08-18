@@ -1,0 +1,28 @@
+# Opts vjencanja-backend into automatic restarts: whenever
+# vjencanja-backend-secret's content changes (e.g. a credential rotation),
+# the config-reloader operator patches this namespace's vjencanja-backend
+# Deployment's pod template, triggering a normal rolling restart governed
+# by that Deployment's own maxUnavailable:0/readiness-probe safety.
+#
+# Namespace is `default`, matching where deployment.yaml and
+# sealed-secret.yaml actually run (this repo doesn't give vjencanja-backend
+# its own namespace) — not the `vjencanja-backend` namespace the design
+# doc's first draft assumed, corrected against the real manifests before
+# this file was written.
+#
+# Bootstrap note: this object can only be created once the ReloadTrigger
+# CRD (operators/config-reloader/config/crd/bases/*.yaml) already exists in
+# the cluster. On a cold first sync, if this Application's sync runs before
+# config-reloader's, ArgoCD shows a transient error here until the CRD
+# lands, then self-heals on its next auto-sync pass — expected, not a bug
+# to chase.
+apiVersion: reloader.homelab.dev/v1alpha1
+kind: ReloadTrigger
+metadata:
+  name: vjencanja-backend-config
+  namespace: default
+spec:
+  targetDeployment: vjencanja-backend
+  watch:
+    - kind: Secret
+      name: vjencanja-backend-secret

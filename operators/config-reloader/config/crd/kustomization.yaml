@@ -1,0 +1,5 @@
+# One CRD today, but this is a Kustomize base (not the CRD file itself) so a
+# second CRD later would just be another line here, never a change to
+# config/default/kustomization.yaml, which only knows "../crd" exists.
+resources:
+  - bases/reloader.homelab.dev_reloadtriggers.yaml

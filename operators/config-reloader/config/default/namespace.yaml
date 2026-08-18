@@ -1,0 +1,8 @@
+# The namespace every resource in this kustomization ends up in, via the
+# `namespace:` field in kustomization.yaml below. ArgoCD's
+# CreateNamespace=true sync option (see apps/applications/config-reloader.yaml)
+# is a belt-and-suspenders backstop for the same thing on first sync.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: config-reloader-system
