@@ -2,7 +2,7 @@
 
 A self-hosted Kubernetes platform, managed entirely through GitOps. This isn't a tutorial cluster — it runs two live backend services (`getreeba`, `vjencanja-backend`) behind real public domains, with every change to cluster state going through git rather than manual `kubectl` commands.
 
-**Stack:** k3s · ArgoCD · Argo CD Image Updater · Traefik · Helm · Bitnami Sealed Secrets · kube-prometheus-stack (Prometheus + Grafana) · GHCR
+**Stack:** k3s · ArgoCD · Argo CD Image Updater · Traefik · Helm · Bitnami Sealed Secrets · kube-prometheus-stack (Prometheus + Grafana) · GHCR · a hand-built Kubernetes operator (Go, Kubebuilder, controller-runtime)
 
 ---
 
@@ -18,12 +18,13 @@ A self-hosted Kubernetes platform, managed entirely through GitOps. This isn't a
 | **Platform vs. application layering** | Cluster add-ons (ArgoCD, monitoring, secrets controller) installed via Helm; application workloads defined as plain manifests — a deliberate separation between "platform" and "product" concerns. |
 | **App-of-apps / progressive GitOps** | Started as one flat `directory` Application; `vjencanja-backend` was deliberately carved out into its own Kustomize-aware child Application once automated image promotion needed it — expanding the pattern only where it earns its complexity, not converting the whole repo speculatively. |
 | **Automated, credential-isolated CI/CD** | `vjencanja-backend` redeploys on every push to `main` with zero shared secrets between the app repo and this one — the write credential that closes the loop lives only in-cluster. See "Automated image promotion" below. |
+| **Custom operators / CRDs** | `config-reloader` (`operators/config-reloader/`) is a hand-written Kubebuilder/controller-runtime operator — not an installed tool — that reconciles a `ReloadTrigger` custom resource and automatically rolling-restarts a Deployment when the ConfigMap/Secret it references changes content. Covers the reconcile-loop, secondary-watch, and CRD-with-status-subresource patterns end to end. See "Automatic config/secret reload" below and `docs/CONFIG-RELOADER.md`. |
 
 ---
 
 ## Architecture
 
-Two ArgoCD Applications, not one — this is a deliberate hybrid, not an accident:
+Three ArgoCD Applications, not one — this is a deliberate hybrid, not an accident:
 
 ```
                         ┌───────────────────────────────────────────────────────┐
@@ -34,17 +35,27 @@ Two ArgoCD Applications, not one — this is a deliberate hybrid, not an acciden
                         │       │                                                  │
                         │       ├──▶ getreeba (Deployment/Service/Ingress/Secret)  │
                         │       ├──▶ Ingress: argocd, grafana                      │
-                        │       └──▶ apps/applications/vjencanja-backend.yaml      │
+                        │       ├──▶ apps/applications/vjencanja-backend.yaml      │
+                        │       │        │ (bootstraps a child Application)        │
+                        │       │        ▼                                        │
+                        │       │  vjencanja-backend (Application: Kustomize)      │
+                        │       │  watches apps/vjencanja-backend/ directly        │
+                        │       │        │                                        │
+                        │       │        ▼                                        │
+                        │       │  Deployment / Service / Ingress / SealedSecret   │
+                        │       │        ▲                                        │
+                        │       │        │ digest write-back (git push)           │
+                        │       │  Argo CD Image Updater ◀── polls ghcr.io/fosle…  │
+                        │       │                                                  │
+                        │       └──▶ apps/applications/config-reloader.yaml        │
                         │                    │ (bootstraps a child Application)    │
                         │                    ▼                                     │
-                        │       vjencanja-backend (Application: Kustomize)         │
-                        │       watches apps/vjencanja-backend/ directly           │
+                        │       config-reloader (Application: Kustomize)           │
+                        │       watches operators/config-reloader/config/default   │
                         │                    │                                     │
                         │                    ▼                                     │
-                        │       Deployment / Service / Ingress / SealedSecret      │
-                        │                    ▲                                     │
-                        │                    │ digest write-back (git push)        │
-                        │       Argo CD Image Updater ◀── polls ghcr.io/fosleen/…  │
+                        │       CRD + RBAC + controller, in config-reloader-system │
+                        │       (reconciles the ReloadTrigger shown above)         │
                         │                                                          │
                         │  Traefik (built into k3s) ── Ingress ──▶                │
                         │  argocd.homelab.local · api.getreeba.com                 │
@@ -52,7 +63,9 @@ Two ArgoCD Applications, not one — this is a deliberate hybrid, not an acciden
                         └───────────────────────────────────────────────────────┘
 ```
 
-**Why two Applications:** `homelab` is a plain `directory`-type source with `recurse: true` — it has no idea what a `kustomization.yaml` is and just `kubectl apply`s every file it finds. That's fine for static manifests, but Argo CD Image Updater needs a Kustomize-aware Application to rewrite an image digest declaratively, and it needs one Application per unit it independently redeploys. So `vjencanja-backend` was carved out into its own child Application — a minimal, deliberate app-of-apps pattern, not the whole repo converted to one. `getreeba` still hangs directly off `homelab` since nothing about it needs Kustomize (yet).
+**Why three Applications:** `homelab` is a plain `directory`-type source with `recurse: true` — it has no idea what a `kustomization.yaml` is and just `kubectl apply`s every file it finds. That's fine for static manifests, but Argo CD Image Updater needs a Kustomize-aware Application to rewrite an image digest declaratively, and it needs one Application per unit it independently redeploys. So `vjencanja-backend` was carved out into its own child Application — a minimal, deliberate app-of-apps pattern, not the whole repo converted to one. `getreeba` still hangs directly off `homelab` since nothing about it needs Kustomize (yet).
+
+The third, `config-reloader`, exists for the same underlying reason — its manifests are Kubebuilder's own generated Kustomize output (`operators/config-reloader/config/default`), so it needs a Kustomize-aware Application too. Unlike `vjencanja-backend`, it needed no `exclude` on `homelab`'s side at all: its source lives under `operators/`, entirely outside the `apps/` tree `homelab` watches, so there was never any overlap to carve out of in the first place.
 
 ---
 
@@ -68,8 +81,15 @@ apps/
 │                             # directly by `homelab`
 ├── image-updater/           # Sealed credentials Argo CD Image Updater needs: an SSH
 │                             # deploy key for git write-back, a GHCR pull secret
-└── vjencanja-backend/        # Deployment, Service, Ingress, SealedSecret, kustomization.yaml
-                               # — managed by its own child Application (see Architecture)
+└── vjencanja-backend/        # Deployment, Service, Ingress, SealedSecret, kustomization.yaml,
+                               # ReloadTrigger — managed by its own child Application (see Architecture)
+
+operators/
+└── config-reloader/          # Hand-built Kubebuilder/controller-runtime operator — a Go module
+                               # (api/, controllers/, main.go), Dockerfile, and its own config/
+                               # (Kustomize output: CRD, RBAC, manager Deployment) that
+                               # apps/applications/config-reloader.yaml points ArgoCD straight at.
+                               # See docs/CONFIG-RELOADER.md for the full build story.
 
 tools/
 └── deploy-verify/            # Go CLI, invoked from vjencanja's CI, that polls the live
@@ -106,6 +126,16 @@ The output is a `SealedSecret` CRD — safe to commit publicly, since only the i
 
 Digest tracking (not a version tag) is what makes this work without a release process: the app always deploys whatever is actually behind `:latest`, no manual tag bump required. See `apps/vjencanja-backend/SETUP.md` for the one-time bootstrap this depends on.
 
+### Automatic config/secret reload
+`vjencanja-backend` also redeploys itself whenever the Secret it consumes changes content — no more manual `kubectl rollout restart` after a credential rotation. Unlike the image-promotion flow above, this isn't an installed tool; it's a small Kubernetes operator built from scratch (`operators/config-reloader/`), specifically to demonstrate the underlying patterns — reconcile loops, secondary watches, a CRD with a real status subresource — hands-on rather than by configuring something pre-built:
+
+1. `apps/vjencanja-backend/reload-trigger.yaml` declares a `ReloadTrigger` custom resource: watch `vjencanja-backend-secret`, restart `vjencanja-backend` if it changes.
+2. The `config-reloader` controller (its own child Application — see Architecture above) reconciles that object: on every change to the watched Secret, it re-hashes the Secret's content and compares it to the hash it saw last time.
+3. On a mismatch, it patches `vjencanja-backend`'s pod template with a new hash + timestamp annotation — the same mechanism `kubectl rollout restart` uses — which the Deployment controller turns into a normal rolling update, governed by the same `maxUnavailable: 0` / readiness-probe safety the image-promotion flow above already relies on.
+4. `status.observedHash` / `status.lastReloadTime` / a `Ready` condition get written back onto the `ReloadTrigger`, so `kubectl get reloadtriggers` shows exactly what happened and when — no digging through Deployment annotations to find out.
+
+Full build story, the CRD-vs-annotation design decision and why, and a file-by-file code walkthrough: `docs/CONFIG-RELOADER.md`.
+
 ### Platform add-ons via Helm
 ArgoCD, the Sealed Secrets controller, `kube-prometheus-stack`, and Argo CD Image Updater are installed as Helm releases — standard practice for cluster infrastructure that benefits from upstream-maintained charts, versioned upgrades, and configurable values, as opposed to hand-rolled manifests. (Image Updater specifically is pinned to a pre-1.0 chart version — its 1.0 release moved primary configuration to a separate CRD and only optionally honors the Application-annotation style this repo uses, so pinning avoids silently losing config on an upgrade.)
 
@@ -123,12 +153,13 @@ ArgoCD, the Sealed Secrets controller, `kube-prometheus-stack`, and Argo CD Imag
 Actively planned next steps, in priority order:
 
 1. ~~Automated image promotion~~ — done via Argo CD Image Updater (digest strategy, git write-back, app-of-apps split for `vjencanja-backend`). See "Automated image promotion" above, `apps/vjencanja-backend/SETUP.md` for the one-time bootstrap, and `vjencanja`'s `.github/workflows/api-deploy.yml` for the CI side.
-2. **Clean up the stuck `monitoring` namespace** — a prior teardown left it wedged in `Terminating` (likely a `kube-prometheus-stack` CRD finalizer with no operator left to clear it); `apps/grafana/ingress.yaml` was removed so nothing keeps trying to write into it, but the namespace itself still needs a manual finalizer-clear before monitoring can come back.
-3. **TLS via cert-manager** — issue certs for all ingress hosts and drop the current homelab-only HTTP setup.
-4. **Shared Helm chart for app workloads** — `getreeba` and `vjencanja-backend` are structurally identical; templatizing them removes duplication as more services are added.
-5. **Extend the app-of-apps split to `getreeba`** — if it ever needs its own Kustomize-aware Application (e.g. for the same kind of image automation `vjencanja-backend` now has), the pattern in `apps/applications/` is already there to copy.
-6. **High availability** — multi-replica deployments with `PodDisruptionBudget`s once the cluster has more than one node.
-7. **Infrastructure-as-code for cluster bootstrap** — script the steps above (Ansible or a shell bootstrap) so the whole environment is reproducible from a single command.
+2. ~~Automatic restart on config/secret change~~ — done via `config-reloader`, a hand-built Kubernetes operator (Go, Kubebuilder, controller-runtime) reconciling a `ReloadTrigger` CRD. See "Automatic config/secret reload" above and `docs/CONFIG-RELOADER.md` for the full build story.
+3. **Clean up the stuck `monitoring` namespace** — a prior teardown left it wedged in `Terminating` (likely a `kube-prometheus-stack` CRD finalizer with no operator left to clear it); `apps/grafana/ingress.yaml` was removed so nothing keeps trying to write into it, but the namespace itself still needs a manual finalizer-clear before monitoring can come back.
+4. **TLS via cert-manager** — issue certs for all ingress hosts and drop the current homelab-only HTTP setup.
+5. **Shared Helm chart for app workloads** — `getreeba` and `vjencanja-backend` are structurally identical; templatizing them removes duplication as more services are added.
+6. **Extend the app-of-apps split to `getreeba`** — if it ever needs its own Kustomize-aware Application (e.g. for the same kind of image automation `vjencanja-backend` now has), the pattern in `apps/applications/` is already there to copy. This includes opting it into `config-reloader` — just a new `ReloadTrigger` manifest once it has a Secret/ConfigMap worth watching.
+7. **High availability** — multi-replica deployments with `PodDisruptionBudget`s once the cluster has more than one node.
+8. **Infrastructure-as-code for cluster bootstrap** — script the steps above (Ansible or a shell bootstrap) so the whole environment is reproducible from a single command.
 
 ---
 
