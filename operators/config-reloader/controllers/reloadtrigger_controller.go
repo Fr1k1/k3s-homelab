@@ -167,12 +167,21 @@ func (r *ReloadTriggerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// This is the actual restart mechanism: patch the pod template's own
 	// annotations (not the Deployment's top-level annotations — see the
 	// const block's comment above for why that distinction matters).
+	//
+	// A real client.Patch (strategic merge, via MergeFrom against the
+	// object as fetched above) rather than a full r.Update - matches the
+	// +kubebuilder:rbac marker above, which only ever granted "patch" on
+	// deployments (not "update"). This used to call r.Update, which
+	// silently required a verb the ClusterRole never had, so every
+	// reconcile past this point failed with a Forbidden error and no
+	// Deployment ever actually got restarted.
+	original := deploy.DeepCopy()
 	if deploy.Spec.Template.Annotations == nil {
 		deploy.Spec.Template.Annotations = map[string]string{}
 	}
 	deploy.Spec.Template.Annotations[configHashAnnotation] = newHash
 	deploy.Spec.Template.Annotations[restartedAtAnnotation] = time.Now().UTC().Format(time.RFC3339)
-	if err := r.Update(ctx, &deploy); err != nil {
+	if err := r.Patch(ctx, &deploy, client.MergeFrom(original)); err != nil {
 		return ctrl.Result{}, err
 	}
 
