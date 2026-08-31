@@ -1,0 +1,64 @@
+# CI for the config-reloader operator itself. Deliberately simpler than
+# vjencanja's api-deploy.yml (see docs/CICD.md): that pipeline needs a
+# verify-deploy job because it closes an *asynchronous* loop across two
+# separate GitHub repos with no shared credentials. This one doesn't — the
+# controller's source lives in this same repo, there's no cross-repo
+# credential problem to solve, and (per the earlier build decision) a new
+# image here doesn't auto-deploy anyway: rolling it out is a manual
+# `newTag` edit in operators/config-reloader/config/manager/kustomization.yaml,
+# so there's no async gap that needs a poll-until-live check.
+name: config-reloader
+
+on:
+  push:
+    branches: [master]
+    # path filters mean unrelated pushes elsewhere in this repo (getreeba,
+    # vjencanja-backend manifests, docs) never trigger a rebuild here —
+    # same pattern vjencanja's own CI uses to path-filter on api/**.
+    paths:
+      - 'operators/config-reloader/**'
+      - '.github/workflows/config-reloader.yml'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # write access to this repo's own GHCR package namespace only — never
+      # anything broader, same "smallest credential that does the job"
+      # principle the rest of this repo's CI/CD already follows.
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.5'
+
+      # Runs the exact same `go test ./...` a developer runs locally before
+      # committing — CI's job is to make that check non-optional, not to
+      # run different tests than the ones already trusted locally.
+      - name: Run tests
+        working-directory: operators/config-reloader
+        run: go test ./...
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          # GITHUB_TOKEN is scoped to this repo and this job's declared
+          # `permissions:` above — no long-lived PAT stored as a secret.
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: operators/config-reloader
+          push: true
+          # :latest for convenience, :<sha> for traceability/rollback —
+          # same dual-tag pattern vjencanja's own build step uses.
+          tags: |
+            ghcr.io/fr1k1/config-reloader:latest
+            ghcr.io/fr1k1/config-reloader:${{ github.sha }}

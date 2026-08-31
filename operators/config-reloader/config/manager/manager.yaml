@@ -1,0 +1,64 @@
+# The controller's own workload — a Deployment running the manager binary
+# built by ../../Dockerfile. Deliberately ordinary: this is exactly the
+# kind of Deployment/Service/probes/resources shape every other app in
+# this repo (apps/vjencanja-backend/deployment.yaml) already uses, because
+# a controller pod is, mechanically, just another pod.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-manager
+  namespace: system
+  labels:
+    app: config-reloader
+spec:
+  # Single replica: leader election is deliberately off in main.go to
+  # match. Bumping this without also turning leader election back on
+  # would mean multiple reconcile loops racing each other on the same
+  # objects.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: config-reloader
+  template:
+    metadata:
+      labels:
+        app: config-reloader
+    spec:
+      serviceAccountName: controller-manager
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: manager
+          image: ghcr.io/fr1k1/config-reloader:latest
+          args:
+            - --health-probe-bind-address=:8081
+            - --metrics-bind-address=:8080
+          ports:
+            - containerPort: 8081
+              name: health
+          # These paths only respond because main.go explicitly calls
+          # mgr.AddHealthzCheck("healthz", ...) / AddReadyzCheck("readyz",
+          # ...) — controller-runtime doesn't wire them up automatically.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

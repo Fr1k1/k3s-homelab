@@ -1,0 +1,25 @@
+# The single Kustomize root ArgoCD's config-reloader Application points at
+# (apps/applications/config-reloader.yaml's spec.source.path) — everything
+# needed to run this operator in one place: the namespace it lives in, the
+# CRD that teaches the API server what ReloadTrigger is, the RBAC that lets
+# the controller actually read/patch what it needs, and the controller's
+# own Deployment.
+#
+# `namespace:` rewrites every namespaced resource pulled in below (and
+# their cross-references — e.g. a ClusterRoleBinding's subject namespace)
+# to config-reloader-system, regardless of what namespace each base file
+# says on its own (they all say the placeholder `system`). `namePrefix:`
+# does the equivalent for names: `controller-manager` (as written in
+# ../manager/manager.yaml and ../rbac/service_account.yaml) becomes
+# `config-reloader-controller-manager` here — and Kustomize's built-in
+# reference-fixing keeps every other file's *pointer* to that name (e.g.
+# the ClusterRoleBinding's `subjects[0].name`) in sync automatically, so
+# there's exactly one place that ever hardcodes the plain, unprefixed name.
+namespace: config-reloader-system
+namePrefix: config-reloader-
+
+resources:
+  - namespace.yaml
+  - ../crd
+  - ../rbac
+  - ../manager

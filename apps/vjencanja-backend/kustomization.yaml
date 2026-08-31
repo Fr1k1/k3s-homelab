@@ -5,6 +5,7 @@ resources:
   - service.yaml
   - ingress.yaml
   - sealed-secret.yaml
+  - reload-trigger.yaml
 images:
   - name: ghcr.io/fosleen/vjencanja-backend
-    digest: sha256:895b5027ac87eece7f2d6f0f2f36dc543e16500a3d3462f1908f9f75b84691c0
+    digest: sha256:dec163808602411055bbf734e31869f3b7e745b082a23bffe5e8e1b1e7b7af5a

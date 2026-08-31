@@ -1,0 +1,33 @@
+# Child ArgoCD Application for the config-reloader operator — same
+# app-of-apps shape as apps/applications/vjencanja-backend.yaml (see
+# README.md's "Why two Applications"): the umbrella `homelab` Application
+# applies this one file directly, which then bootstraps its own
+# independent, Kustomize-aware Application watching a different path.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: config-reloader
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Fr1k1/k3s-homelab.git
+    targetRevision: master
+    # Points straight at Kubebuilder's own Kustomize output
+    # (operators/config-reloader/config/default), not a separate
+    # hand-copied set of manifests under apps/ — one source of truth for
+    # what actually gets deployed.
+    path: operators/config-reloader/config/default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: config-reloader-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # config/default/namespace.yaml already declares config-reloader-system,
+      # but this is a belt-and-suspenders backstop against first-sync
+      # ordering races — the same class of bootstrap hazard the CRD-before-CR
+      # note below is about.
+      - CreateNamespace=true
