@@ -8,4 +8,4 @@ resources:
   - reload-trigger.yaml
 images:
   - name: ghcr.io/fosleen/vjencanja-backend
-    digest: sha256:dec163808602411055bbf734e31869f3b7e745b082a23bffe5e8e1b1e7b7af5a
+    digest: sha256:08cb2515bc9020eeb8dcbb429f066145cbf38aee03bdda82c49728dd1ff504cc
