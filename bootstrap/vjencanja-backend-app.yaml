@@ -1,17 +1,14 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: homelab
+  name: vjencanja-backend
   namespace: argocd
 spec:
   project: default
   source:
     repoURL: https://github.com/Fr1k1/k3s-homelab.git
     targetRevision: master
-    path: apps
-    directory:
-      recurse: true
-      exclude: "{vjencanja-backend/**}"
+    path: apps/vjencanja-backend
   destination:
     server: https://kubernetes.default.svc
     namespace: default
