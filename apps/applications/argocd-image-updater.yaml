@@ -1,0 +1,38 @@
+# Child ArgoCD Application for Argo CD Image Updater — same app-of-apps
+# shape as the other files in this directory: the umbrella `homelab`
+# Application applies this file, and this Application installs the Helm
+# chart. Values live inline here, so the GHCR registry config is in git
+# instead of a `helm install -f` on the node.
+#
+# Pinned to chart 0.14.0 (app v0.x) on purpose: it is the annotation-based
+# version that apps/applications/vjencanja-backend.yaml is written for.
+# v1.x ignores those annotations and needs ImageUpdater CRs instead.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-image-updater
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argocd-image-updater
+    targetRevision: 0.14.0
+    helm:
+      releaseName: argocd-image-updater
+      valuesObject:
+        config:
+          registries:
+            # Private GHCR image — reads the pull secret sealed in
+            # apps/image-updater/ghcr-pull-sealed.yaml.
+            - name: GitHub Container Registry
+              api_url: https://ghcr.io
+              prefix: ghcr.io
+              credentials: pullsecret:argocd/image-updater-ghcr
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

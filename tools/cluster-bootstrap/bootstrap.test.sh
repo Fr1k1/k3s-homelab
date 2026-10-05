@@ -147,10 +147,12 @@ else
   fail "happy-path: argocd-secret was not restored before ArgoCD was installed (argosecret_line=$argosecret_line, argocd_install_line=$argocd_install_line)"
 fi
 
-if grep -q "helm install argocd-image-updater argo/argocd-image-updater --namespace argocd --version 0.14.0" "$STUB_LOG"; then
-  pass
+# Image Updater is an ArgoCD Application (apps/applications/argocd-image-updater.yaml),
+# so bootstrap must NOT helm-install it too -- two owners of one release.
+if grep -q "helm install" "$STUB_LOG"; then
+  fail "happy-path: bootstrap helm-installed something; Image Updater belongs to ArgoCD, log: $(cat "$STUB_LOG")"
 else
-  fail "happy-path: Image Updater not installed with pinned chart version, log: $(cat "$STUB_LOG")"
+  pass
 fi
 
 # the homelab Application must be the LAST kubectl apply, and use the real file
