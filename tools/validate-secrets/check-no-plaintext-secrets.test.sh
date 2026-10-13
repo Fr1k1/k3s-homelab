@@ -14,7 +14,7 @@ pass() { PASS=$((PASS + 1)); }
 
 setup_repo() {
   REPO="$1/repo"
-  mkdir -p "$REPO/tools/seal-secret" "$REPO/apps/myapp"
+  mkdir -p "$REPO/tools/seal-secret" "$REPO/apps/myapp" "$REPO/monitoring"
   cp "$REAL_SCRIPT" "$REPO/tools/seal-secret/check-no-plaintext-secrets.sh"
   ( cd "$REPO" && git init -q && git config user.email t@t.com && git config user.name t )
 }
@@ -84,6 +84,21 @@ set +e
 out=$(run_check 2>&1); code=$?
 set -e
 if [ "$code" -eq 0 ]; then pass; else fail "untracked-env: expected exit 0, got $code out=$out"; fi
+rm -rf "$t"
+
+# --- test: plaintext Secret under monitoring/ -> fails ---
+t=$(mktemp -d); setup_repo "$t"
+cat > "$REPO/monitoring/oops.yaml" <<'EOF'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-cloud-metrics
+EOF
+( cd "$REPO" && git add -A && git commit -q -m init )
+set +e
+out=$(run_check 2>&1); code=$?
+set -e
+if [ "$code" -ne 0 ] && echo "$out" | grep -q "monitoring/oops.yaml"; then pass; else fail "monitoring-plaintext-secret: got exit=$code out=$out"; fi
 rm -rf "$t"
 
 echo ""

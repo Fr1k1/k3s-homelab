@@ -2,7 +2,7 @@
 
 A self-hosted Kubernetes platform, managed entirely through GitOps. This isn't a tutorial cluster — it runs two live backend services (`getreeba`, `vjencanja-backend`) behind real public domains, with every change to cluster state going through git rather than manual `kubectl` commands.
 
-**Stack:** k3s · ArgoCD · Argo CD Image Updater · Traefik · Helm · Bitnami Sealed Secrets · kube-prometheus-stack (Prometheus + Grafana) · GHCR · a hand-built Kubernetes operator (Go, Kubebuilder, controller-runtime)
+**Stack:** k3s · ArgoCD · Argo CD Image Updater · Traefik · Helm · Bitnami Sealed Secrets · Grafana Cloud (Alloy, kube-state-metrics, node-exporter, Synthetic Monitoring) · GHCR · a hand-built Kubernetes operator (Go, Kubebuilder, controller-runtime)
 
 ---
 
@@ -13,7 +13,7 @@ A self-hosted Kubernetes platform, managed entirely through GitOps. This isn't a
 | **GitOps** | ArgoCD continuously reconciles cluster state against this repo — no manual `kubectl apply` in the deploy path. Git history *is* the deployment history and rollback mechanism. |
 | **Secrets management** | Credentials are never committed in plaintext. Bitnami Sealed Secrets encrypts them asymmetrically against the cluster's public key, so the ciphertext in git is only decryptable by the one controller holding the private key. |
 | **Kubernetes fundamentals** | Deployments, Services, Ingress, namespacing, private registry auth (`imagePullSecrets`), all hand-written (not scaffolded by a GUI). |
-| **Observability** | Prometheus + Grafana (via `kube-prometheus-stack`) running as first-class cluster citizens, exposed through the same ingress pattern as application traffic. |
+| **Observability & alerting** | Grafana Alloy, kube-state-metrics and node-exporter (about 250Mi total) push an allowlisted set of metrics to Grafana Cloud. Alert evaluation, a synthetic uptime + CORS check and email delivery all run off-node, so a dead node is still reported. Alert rules are unit-tested with `promtool` (`monitoring/alert-rules.test.yaml`). |
 | **Ingress / traffic routing** | Traefik handling host-based routing for multiple independent services and domains off a single entry point. |
 | **Platform vs. application layering** | Cluster add-ons (ArgoCD, monitoring, secrets controller) installed via Helm; application workloads defined as plain manifests — a deliberate separation between "platform" and "product" concerns. |
 | **App-of-apps / progressive GitOps** | Started as one flat `directory` Application; `vjencanja-backend` was deliberately carved out into its own Kustomize-aware child Application once automated image promotion needed it — expanding the pattern only where it earns its complexity, not converting the whole repo speculatively. |
@@ -84,6 +84,10 @@ apps/
 └── vjencanja-backend/        # Deployment, Service, Ingress, SealedSecret, kustomization.yaml,
                                # ReloadTrigger — managed by its own child Application (see Architecture)
 
+monitoring/                   # Namespace, SealedSecret, Alloy config (Kustomize, own child
+                               # Application), alert rules + promtool tests, synthetic check
+                               # definition, and manual-only test manifests under test/
+
 operators/
 └── config-reloader/          # Hand-built Kubebuilder/controller-runtime operator — a Go module
                                # (api/, controllers/, main.go), Dockerfile, and its own config/
@@ -137,13 +141,13 @@ Digest tracking (not a version tag) is what makes this work without a release pr
 Full build story, the CRD-vs-annotation design decision and why, and a file-by-file code walkthrough: `docs/CONFIG-RELOADER.md`.
 
 ### Platform add-ons via Helm
-ArgoCD, the Sealed Secrets controller, `kube-prometheus-stack`, and Argo CD Image Updater are installed as Helm releases — standard practice for cluster infrastructure that benefits from upstream-maintained charts, versioned upgrades, and configurable values, as opposed to hand-rolled manifests. (Image Updater specifically is pinned to a pre-1.0 chart version — its 1.0 release moved primary configuration to a separate CRD and only optionally honors the Application-annotation style this repo uses, so pinning avoids silently losing config on an upgrade.)
+ArgoCD, the Sealed Secrets controller, Argo CD Image Updater, and the monitoring agents (Alloy, kube-state-metrics, node-exporter) are installed as Helm releases — standard practice for cluster infrastructure that benefits from upstream-maintained charts, versioned upgrades, and configurable values, as opposed to hand-rolled manifests. (Image Updater specifically is pinned to a pre-1.0 chart version — its 1.0 release moved primary configuration to a separate CRD and only optionally honors the Application-annotation style this repo uses, so pinning avoids silently losing config on an upgrade.)
 
 ### Bootstrapping from zero
 1. Install k3s: `curl -sfL https://get.k3s.io | sh -`
 2. Install Sealed Secrets controller (Helm), capture its public key.
 3. Install ArgoCD (Helm), point it at this repo.
-4. Install `kube-prometheus-stack` (Helm) for monitoring.
+4. Monitoring needs no manual install: ArgoCD deploys it from `apps/applications/monitoring*.yaml` (Grafana Cloud alert rules are re-imported from `monitoring/alert-rules.yaml`).
 5. Let ArgoCD sync `apps/`.
 
 ---
@@ -154,7 +158,7 @@ Actively planned next steps, in priority order:
 
 1. ~~Automated image promotion~~ — done via Argo CD Image Updater (digest strategy, git write-back, app-of-apps split for `vjencanja-backend`). See "Automated image promotion" above, `apps/vjencanja-backend/SETUP.md` for the one-time bootstrap, and `vjencanja`'s `.github/workflows/api-deploy.yml` for the CI side.
 2. ~~Automatic restart on config/secret change~~ — done via `config-reloader`, a hand-built Kubernetes operator (Go, Kubebuilder, controller-runtime) reconciling a `ReloadTrigger` CRD. See "Automatic config/secret reload" above and `docs/CONFIG-RELOADER.md` for the full build story.
-3. **Clean up the stuck `monitoring` namespace** — a prior teardown left it wedged in `Terminating` (likely a `kube-prometheus-stack` CRD finalizer with no operator left to clear it); `apps/grafana/ingress.yaml` was removed so nothing keeps trying to write into it, but the namespace itself still needs a manual finalizer-clear before monitoring can come back.
+3. ~~Monitoring~~: done via Grafana Cloud (see `monitoring/`). The old `monitoring` namespace stuck in `Terminating` can be cleared separately; nothing depends on it.
 4. **TLS via cert-manager** — issue certs for all ingress hosts and drop the current homelab-only HTTP setup.
 5. **Shared Helm chart for app workloads** — `getreeba` and `vjencanja-backend` are structurally identical; templatizing them removes duplication as more services are added.
 6. **Extend the app-of-apps split to `getreeba`** — if it ever needs its own Kustomize-aware Application (e.g. for the same kind of image automation `vjencanja-backend` now has), the pattern in `apps/applications/` is already there to copy. This includes opting it into `config-reloader` — just a new `ReloadTrigger` manifest once it has a Secret/ConfigMap worth watching.

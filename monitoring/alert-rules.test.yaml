@@ -1,0 +1,327 @@
+rule_files:
+  - alert-rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: ApiDown fires when no probe gets a 200
+    interval: 1m
+    input_series:
+      - series: 'probe_http_status_code{job="vjencanja-api", probe="Frankfurt"}'
+        values: '0x10'
+      - series: 'probe_http_status_code{job="vjencanja-api", probe="Paris"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ApiDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ApiDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: vjencanja-api
+            exp_annotations:
+              summary: "api.vjenchanje.com returned no 200 from any probe"
+
+  - name: ApiDown stays quiet when one probe still gets a 200
+    interval: 1m
+    input_series:
+      - series: 'probe_http_status_code{job="vjencanja-api", probe="Frankfurt"}'
+        values: '0x10'
+      - series: 'probe_http_status_code{job="vjencanja-api", probe="Paris"}'
+        values: '200x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ApiDown
+        exp_alerts: []
+
+  - name: ApiDown stays quiet when one probe is healthy and the other gets an error status
+    interval: 1m
+    input_series:
+      - series: 'probe_http_status_code{job="vjencanja-api", probe="Frankfurt"}'
+        values: '200x10'
+      - series: 'probe_http_status_code{job="vjencanja-api", probe="Paris"}'
+        values: '503x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ApiDown
+        exp_alerts: []
+
+  - name: NodeMetricsGone fires after node-exporter data stops
+    interval: 1m
+    input_series:
+      - series: 'up{job="node-exporter", instance="node-1"}'
+        values: '1x5 _x15'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: NodeMetricsGone
+        exp_alerts: []
+      - eval_time: 13m
+        alertname: NodeMetricsGone
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: node-exporter
+            exp_annotations:
+              summary: "No node-exporter data for 5 minutes: node, k3s or Alloy is down"
+
+  - name: NodeMetricsGone stays quiet while data flows
+    interval: 1m
+    input_series:
+      - series: 'up{job="node-exporter", instance="node-1"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NodeMetricsGone
+        exp_alerts: []
+
+  - name: Backend5xxErrors fires on 5xx bursts for vjencanja-backend only
+    interval: 1m
+    input_series:
+      - series: 'traefik_service_requests_total{service="default-vjencanja-backend-80@kubernetes", code="502", method="GET", protocol="http"}'
+        values: '0+2x10'
+      - series: 'traefik_service_requests_total{service="default-vjencanja-backend-80@kubernetes", code="200", method="GET", protocol="http"}'
+        values: '0+50x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: Backend5xxErrors
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "vjencanja-backend served 10 5xx responses in the last 5 minutes"
+
+  - name: Backend5xxErrors fires when the first burst creates the 5xx series
+    interval: 1m
+    input_series:
+      - series: 'traefik_service_requests_total{service="default-vjencanja-backend-80@kubernetes", code="502", method="GET", protocol="http"}'
+        values: '_x4 10x10'
+      - series: 'traefik_service_requests_total{service="default-vjencanja-backend-80@kubernetes", code="200", method="GET", protocol="http"}'
+        values: '0+50x14'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: Backend5xxErrors
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "vjencanja-backend served 10 5xx responses in the last 5 minutes"
+
+  - name: Backend5xxErrors stays quiet once an old burst ages out
+    interval: 1m
+    input_series:
+      - series: 'traefik_service_requests_total{service="default-vjencanja-backend-80@kubernetes", code="502", method="GET", protocol="http"}'
+        values: '_x4 10x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: Backend5xxErrors
+        exp_alerts: []
+
+  - name: Backend5xxErrors ignores occasional errors and other services
+    interval: 1m
+    input_series:
+      - series: 'traefik_service_requests_total{service="default-vjencanja-backend-80@kubernetes", code="500", method="GET", protocol="http"}'
+        values: '0 0 0 1 1 1 2 2 2 2 2'
+      - series: 'traefik_service_requests_total{service="default-getreeba-80@kubernetes", code="502", method="GET", protocol="http"}'
+        values: '0+10x10'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: Backend5xxErrors
+        exp_alerts: []
+
+  - name: CorsBroken fires when the API answers 200 but the header check fails
+    interval: 1m
+    input_series:
+      - series: 'probe_http_status_code{job="vjencanja-api", probe="Frankfurt"}'
+        values: '200x10'
+      - series: 'probe_http_status_code{job="vjencanja-api", probe="Paris"}'
+        values: '200x10'
+      - series: 'probe_success{job="vjencanja-api", probe="Frankfurt"}'
+        values: '0x10'
+      - series: 'probe_success{job="vjencanja-api", probe="Paris"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CorsBroken
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: vjencanja-api
+            exp_annotations:
+              summary: "api.vjenchanje.com answers 200 but Access-Control-Allow-Origin does not match https://app.vjenchanje.com"
+      - eval_time: 5m
+        alertname: ApiDown
+        exp_alerts: []
+
+  - name: CorsBroken stays quiet when the API is down or healthy
+    interval: 1m
+    input_series:
+      - series: 'probe_http_status_code{job="vjencanja-api", probe="Frankfurt"}'
+        values: '0x5 200x5'
+      - series: 'probe_success{job="vjencanja-api", probe="Frankfurt"}'
+        values: '0x5 1x5'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: CorsBroken
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: CorsBroken
+        exp_alerts: []
+
+  - name: BackendUnavailable fires with zero available replicas
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="default", deployment="vjencanja-backend"}'
+        values: '1 1 0x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: BackendUnavailable
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: BackendUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: default
+              deployment: vjencanja-backend
+            exp_annotations:
+              summary: "vjencanja-backend has no available replicas"
+
+  - name: ContainerOOMKilled fires only for OOMKilled restarts
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="monitoring-test", pod="oom", container="hog"}'
+        values: '0 0 0 1x7'
+      - series: 'kube_pod_container_status_last_terminated_reason{namespace="monitoring-test", pod="oom", container="hog", reason="OOMKilled"}'
+        values: '0 0 0 1x7'
+      - series: 'kube_pod_container_status_restarts_total{namespace="default", pod="api", container="app"}'
+        values: '0 0 0 1x7'
+      - series: 'kube_pod_container_status_last_terminated_reason{namespace="default", pod="api", container="app", reason="Error"}'
+        values: '0 0 0 1x7'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ContainerOOMKilled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: monitoring-test
+              pod: oom
+              container: hog
+            exp_annotations:
+              summary: "monitoring-test/oom container hog was OOMKilled"
+
+  - name: NodeMemoryHigh fires above 90 percent and not below
+    interval: 1m
+    input_series:
+      - series: 'node_memory_MemTotal_bytes{job="node-exporter", instance="node-1"}'
+        values: '4000x20'
+      - series: 'node_memory_MemAvailable_bytes{job="node-exporter", instance="node-1"}'
+        values: '1600x5 200x15'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: NodeMemoryHigh
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: NodeMemoryHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: node-exporter
+              instance: node-1
+            exp_annotations:
+              summary: "Node memory usage is 95%"
+
+  - name: NodeDiskFilling fires above 85 percent on the root filesystem only
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_size_bytes{job="node-exporter", instance="node-1", mountpoint="/"}'
+        values: '100x20'
+      - series: 'node_filesystem_avail_bytes{job="node-exporter", instance="node-1", mountpoint="/"}'
+        values: '10x20'
+      - series: 'node_filesystem_size_bytes{job="node-exporter", instance="node-1", mountpoint="/boot"}'
+        values: '100x20'
+      - series: 'node_filesystem_avail_bytes{job="node-exporter", instance="node-1", mountpoint="/boot"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: NodeDiskFilling
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: node-exporter
+              instance: node-1
+              mountpoint: /
+            exp_annotations:
+              summary: "Root filesystem is 90% full"
+
+  - name: PodCrashLooping fires above 3 restarts in 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="monitoring-test", pod="oom", container="hog"}'
+        values: '0+1x20'
+      - series: 'kube_pod_container_status_restarts_total{namespace="default", pod="api", container="app"}'
+        values: '0 0 0 1 1 1 2x14'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: PodCrashLooping
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: monitoring-test
+              pod: oom
+              container: hog
+            exp_annotations:
+              summary: "monitoring-test/oom restarted 15 times in 15 minutes"
+
+  - name: NodeCpuSaturated fires after 15 minutes above 90 percent
+    interval: 1m
+    input_series:
+      - series: 'node_cpu_seconds_total{job="node-exporter", instance="node-1", cpu="0", mode="idle"}'
+        values: '0+3x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NodeCpuSaturated
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: NodeCpuSaturated
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Node CPU usage is 95%"
+
+  - name: ApiSlow fires after 3 slow minutes
+    interval: 1m
+    input_series:
+      - series: 'probe_duration_seconds{job="vjencanja-api", probe="Frankfurt"}'
+        values: '0.2x3 3x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ApiSlow
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: ApiSlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: vjencanja-api
+            exp_annotations:
+              summary: "api.vjenchanje.com takes 3.0s to answer"
+
+  - name: TlsCertExpiring fires inside 14 days and not outside
+    interval: 1m
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{job="vjencanja-api", probe="Frankfurt"}'
+        values: '864000x20'
+      - series: 'probe_ssl_earliest_cert_expiry{job="other-api", probe="Frankfurt"}'
+        values: '5184000x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: TlsCertExpiring
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: vjencanja-api
+            exp_annotations:
+              summary: "TLS certificate for api.vjenchanje.com expires in 9d 23h 45m 0s"

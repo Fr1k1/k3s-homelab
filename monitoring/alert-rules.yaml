@@ -1,0 +1,104 @@
+groups:
+  - name: vjencanja-critical
+    interval: 1m
+    rules:
+      - alert: ApiDown
+        expr: max by (job) (probe_http_status_code{job="vjencanja-api"} == bool 200) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "api.vjenchanje.com returned no 200 from any probe"
+
+      - alert: NodeMetricsGone
+        expr: absent_over_time(up{job="node-exporter"}[5m])
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No node-exporter data for 5 minutes: node, k3s or Alloy is down"
+
+      - alert: Backend5xxErrors
+        expr: |
+          sum(clamp_min(
+            traefik_service_requests_total{service=~"default-vjencanja-backend-.*", code=~"5.."}
+            - (traefik_service_requests_total{service=~"default-vjencanja-backend-.*", code=~"5.."} offset 5m
+               or traefik_service_requests_total{service=~"default-vjencanja-backend-.*", code=~"5.."} * 0),
+            0)) >= 5
+        labels:
+          severity: critical
+        annotations:
+          summary: "vjencanja-backend served {{ $value | humanize }} 5xx responses in the last 5 minutes"
+
+      - alert: CorsBroken
+        expr: max by (job) (probe_success{job="vjencanja-api"}) == 0 and on (job) min by (job) (probe_http_status_code{job="vjencanja-api"}) == 200
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "api.vjenchanje.com answers 200 but Access-Control-Allow-Origin does not match https://app.vjenchanje.com"
+
+      - alert: BackendUnavailable
+        expr: kube_deployment_status_replicas_available{namespace="default", deployment="vjencanja-backend"} < 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "vjencanja-backend has no available replicas"
+
+      - alert: ContainerOOMKilled
+        expr: (increase(kube_pod_container_status_restarts_total[10m]) > 0) and on (namespace, pod, container) (kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1)
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }} container {{ $labels.container }} was OOMKilled"
+
+  - name: vjencanja-warning
+    interval: 1m
+    rules:
+      - alert: NodeMemoryHigh
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node memory usage is {{ $value | printf \"%.0f\" }}%"
+
+      - alert: NodeDiskFilling
+        expr: (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Root filesystem is {{ $value | printf \"%.0f\" }}% full"
+
+      - alert: PodCrashLooping
+        expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }} restarted {{ $value | printf \"%.0f\" }} times in 15 minutes"
+
+      - alert: NodeCpuSaturated
+        expr: (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100 > 90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node CPU usage is {{ $value | printf \"%.0f\" }}%"
+
+      - alert: ApiSlow
+        expr: avg by (job) (probe_duration_seconds{job="vjencanja-api"}) > 2
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "api.vjenchanje.com takes {{ $value | printf \"%.1f\" }}s to answer"
+
+      - alert: TlsCertExpiring
+        expr: min by (job) (probe_ssl_earliest_cert_expiry{job="vjencanja-api"}) - time() < 14 * 86400
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "TLS certificate for api.vjenchanje.com expires in {{ $value | humanizeDuration }}"

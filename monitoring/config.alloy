@@ -1,0 +1,123 @@
+discovery.kubernetes "node_exporter" {
+	role = "pod"
+
+	namespaces {
+		names = ["monitoring-v2"]
+	}
+
+	selectors {
+		role  = "pod"
+		label = "app.kubernetes.io/name=prometheus-node-exporter"
+	}
+}
+
+discovery.kubernetes "kube_state_metrics" {
+	role = "pod"
+
+	namespaces {
+		names = ["monitoring-v2"]
+	}
+
+	selectors {
+		role  = "pod"
+		label = "app.kubernetes.io/name=kube-state-metrics"
+	}
+}
+
+discovery.kubernetes "traefik" {
+	role = "pod"
+
+	namespaces {
+		names = ["kube-system"]
+	}
+
+	selectors {
+		role  = "pod"
+		label = "app.kubernetes.io/name=traefik"
+	}
+}
+
+discovery.relabel "node_exporter" {
+	targets = discovery.kubernetes.node_exporter.targets
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_container_port_name"]
+		regex         = "metrics"
+		action        = "keep"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_node_name"]
+		target_label  = "instance"
+	}
+}
+
+discovery.relabel "kube_state_metrics" {
+	targets = discovery.kubernetes.kube_state_metrics.targets
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_container_port_name"]
+		regex         = "http"
+		action        = "keep"
+	}
+}
+
+discovery.relabel "traefik" {
+	targets = discovery.kubernetes.traefik.targets
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_container_port_name"]
+		regex         = "metrics"
+		action        = "keep"
+	}
+}
+
+prometheus.scrape "node_exporter" {
+	targets    = discovery.relabel.node_exporter.output
+	job_name   = "node-exporter"
+	forward_to = [prometheus.relabel.allowlist.receiver]
+}
+
+prometheus.scrape "kube_state_metrics" {
+	targets      = discovery.relabel.kube_state_metrics.output
+	job_name     = "kube-state-metrics"
+	honor_labels = true
+	forward_to   = [prometheus.relabel.allowlist.receiver]
+}
+
+prometheus.scrape "traefik" {
+	targets    = discovery.relabel.traefik.output
+	job_name   = "traefik"
+	forward_to = [prometheus.relabel.allowlist.receiver]
+}
+
+prometheus.relabel "allowlist" {
+	forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+	rule {
+		source_labels = ["__name__"]
+		regex         = "up|node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|node_filesystem_avail_bytes|node_filesystem_size_bytes|node_cpu_seconds_total|node_vmstat_oom_kill|kube_pod_container_status_restarts_total|kube_pod_container_status_last_terminated_reason|kube_deployment_status_replicas_available|kube_deployment_spec_replicas|traefik_service_requests_total"
+		action        = "keep"
+	}
+
+	rule {
+		source_labels = ["__name__", "mountpoint"]
+		regex         = "node_filesystem_.+;/.+"
+		action        = "drop"
+	}
+}
+
+prometheus.remote_write "grafana_cloud" {
+	external_labels = {
+		cluster = "hetzner-k3s",
+	}
+
+	endpoint {
+		url = sys.env("GRAFANA_CLOUD_PROM_URL")
+
+		basic_auth {
+			username = sys.env("GRAFANA_CLOUD_PROM_USER")
+			password = sys.env("GRAFANA_CLOUD_PROM_TOKEN")
+		}
+	}
+}

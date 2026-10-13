@@ -1,332 +1,235 @@
-# config-reloader: how it works, and how to explain it in an interview
+# config-reloader — study guide
 
-This is a reference doc for explaining `operators/config-reloader` out loud
-— in an interview, a design review, or to yourself six months from now
-having forgotten the details. It follows the same shape as `CICD.md`: what
-was built, why each piece exists, and the real judgment calls made getting
-here. Read top-to-bottom for the full story, or jump to "Anticipated
-questions" at the end for talking points.
+Written for you specifically: strong on Kubernetes/GitOps/Docker/Helm
+already, **this is your first Go code and your first operator**. So this
+skips explaining what a Deployment or a Secret is, and spends its time on
+what's actually new — Go syntax, and how a controller/CRD actually works
+under the hood. Goal: be able to talk through this confidently in a
+Platform Software Engineer interview, not recite it from memory.
 
-Related: `superpowers/specs/2026-08-05-config-reloader-design.md` (the
-original design decisions and their rationale), `superpowers/plans/2026-08-05-config-reloader.md`
-(the file-by-file build plan), `../README.md` (repo overview).
-
----
-
-## The problem, in one sentence
-
-Kubernetes doesn't roll a Deployment when a ConfigMap or Secret it consumes
-changes — the pod template text is unchanged, so nothing tells the
-Deployment controller to restart anything. This project builds a small,
-from-scratch operator that does it automatically: opt a Deployment in by
-creating a `ReloadTrigger` custom resource, and any change to the
-ConfigMaps/Secrets it lists triggers a real, safe rolling restart.
-
-**Why build it instead of installing the existing tool that already does
-this** (Reloader, by Stakater): the goal isn't the automation — it's
-hands-on experience with the actual Kubebuilder/controller-runtime patterns
-(reconcile loops, secondary watches, CRDs with status subresources, RBAC
-generation) that the job requirement "hands-on familiarity with Kubernetes
-operators, controllers, or custom resources" is actually asking about.
+Related: `../operators/config-reloader/` (the code, now heavily commented
+— read it alongside this), `superpowers/specs/2026-08-05-config-reloader-design.md`
+(why a CRD, not an annotation), `../README.md` (how this fits the rest of
+the repo).
 
 ---
 
-## The one-sentence architecture
+## The 60-second pitch (say this if asked "tell me about a project")
 
-A single controller reconciles a namespaced CRD, `ReloadTrigger`
-(`reloader.homelab.dev/v1alpha1`). Its `spec` declares intent (which
-Deployment to restart, which ConfigMaps/Secrets to watch); its `status`
-reports what the controller actually observed (a content hash, when it last
-restarted something, a `Ready` condition). On every reconcile, the
-controller re-hashes the watched resources' current content and compares it
-to the hash it saw last time — a mismatch means "something changed," which
-triggers a Deployment pod-template patch (the same mechanism
-`kubectl rollout restart` uses).
-
----
-
-## Why a CRD, not just an annotation
-
-The first design pass used a plain annotation on the Deployment itself
-(`reloader.homelab.dev/watch: configmap:foo,secret:bar`) — simpler, no new
-API type, and closer to how the real Reloader tool works. That got replaced
-with a CRD deliberately, for reasons worth being able to defend out loud:
-
-- The job posting explicitly names **custom resources** as one of three
-  things to have hands-on familiarity with. An annotation demonstrates none
-  of that.
-- A CRD gives a real, demoable artifact — `kubectl get reloadtriggers`
-  shows `TARGET`/`READY`/`REASON`/`LAST RELOAD`/`AGE` columns at a glance,
-  versus needing `kubectl describe deployment` and reading annotations to
-  understand an annotation-only design.
-- It's a **load-bearing** use of a CRD, not a decorative one — the litmus
-  test for whether a CRD is "real": does `spec` declare genuine intent, and
-  does `status` report genuine observed state only the controller could
-  know? Here, yes to both. A CRD that's just a fancy ConfigMap (nothing in
-  `status` that the controller actually computed) would have been the wrong
-  call even with the CV pressure to "use a CRD somewhere."
-
-The trade-off accepted: opting a Deployment in now means writing a new
-`ReloadTrigger` manifest rather than adding one annotation line to an
-existing Deployment. Marginally more GitOps surface, for a meaningfully
-better interview answer.
+"Kubernetes doesn't restart a Deployment when a ConfigMap or Secret it
+uses changes — I'd been doing `kubectl rollout restart` by hand after every
+credential rotation. I built a small Kubernetes operator from scratch in Go
+— not installed an existing one — that watches a custom resource I
+defined, `ReloadTrigger`, which declares 'watch this Secret, restart that
+Deployment.' When the Secret's content changes, the controller hashes it,
+notices the hash differs from last time, and patches the target
+Deployment's pod template to trigger a normal rolling restart — same
+mechanism `kubectl rollout restart` uses, so it inherits the Deployment's
+existing zero-downtime rollout config for free. It's live in my homelab
+cluster today, watching a real production secret."
 
 ---
 
-## File-by-file walkthrough
+## Go, for someone who's never written it
 
-### `api/v1alpha1/` — the CRD's Go type definitions
+Scoped tightly to what this codebase actually uses — not a Go course.
 
-- **`groupversion_info.go`** — registers the API group/version
-  (`reloader.homelab.dev/v1alpha1`) with Kubernetes' type system, so a
-  generic client can turn decoded JSON/YAML bytes into a Go
-  `*ReloadTrigger` struct. Every custom resource needs this file; it's
-  almost entirely boilerplate.
-- **`reloadtrigger_types.go`** — the actual API definition. Three things
-  worth being able to explain cold:
-  1. **The spec/status split.** `ReloadTriggerSpec` is what a human/GitOps
-     pipeline writes down (desired state); `ReloadTriggerStatus` is what
-     only the controller can write (observed state — a hash, a timestamp,
-     a condition). This split, backed by `+kubebuilder:subresource:status`,
-     is what makes something a genuine control loop instead of a config
-     file with extra steps.
-  2. **Validation markers become real API-server validation.**
-     `+kubebuilder:validation:Enum=ConfigMap;Secret` and `MinItems=1`
-     aren't comments — `controller-gen` compiles them into the CRD's
-     OpenAPI schema, so a malformed `ReloadTrigger` gets rejected by the
-     Kubernetes API server itself, before this controller's code ever
-     runs.
-  3. **Printer columns are what make `kubectl get` useful.** The
-     `+kubebuilder:printcolumn` markers are the entire reason
-     `kubectl get reloadtriggers` shows meaningful columns instead of just
-     `NAME`/`AGE`.
-- **`zz_generated.deepcopy.go`** — 100% generated by `controller-gen`,
-  never hand-edited (the `zz_` prefix is a convention signaling "sorts to
-  the bottom, don't touch"). Implements `DeepCopyObject()`, which
-  Kubernetes' machinery requires so objects can be safely cloned across
-  goroutine boundaries (the informer cache) without one goroutine's mutation
-  corrupting another's view. Regenerate via:
-  ```
-  controller-gen object paths="./api/v1alpha1"
-  ```
-- **`reloadtrigger_types_test.go`** — one real test: deep-copy a
-  `ReloadTrigger`, mutate the copy's `Watch` slice, assert the original is
-  untouched. This is the test that would catch a *shallow* copy bug (one
-  that copies the slice header but shares the backing array) — a subtle,
-  real bug class in generated code, not a box-ticking test.
-
-### `controllers/` — the reconcile loop
-
-- **`hash.go`** — pure functions, no Kubernetes client involved. Takes the
-  fetched content of every watched ConfigMap/Secret and reduces it to one
-  deterministic sha256 hex digest. "Deterministic" requires two explicit
-  sorting passes (resources by kind+name, each resource's own keys) because
-  Go's map iteration order is randomized per-process — skip either sort and
-  the hash changes on every call even when content hasn't, which would make
-  the controller think something changed on every single reconcile.
-- **`reloadtrigger_controller.go`** — the reconciler itself. The whole
-  `Reconcile` method is a three-way branch on comparing a freshly computed
-  hash to `status.observedHash`:
-  1. **No previous hash** (`ObservedHash == ""`) → record a baseline, no
-     restart. Opting an already-healthy Deployment in must not itself
-     cause a restart.
-  2. **Hash unchanged** → true no-op. This is what makes the whole loop
-     safe to run redundantly — reconciling with nothing changed produces
-     zero side effects.
-  3. **Hash changed** → patch the target Deployment's **pod template**
-     annotations (`spec.template.metadata.annotations`, not the
-     Deployment's own top-level annotations) with the new hash and a
-     timestamp. This is the same trick `kubectl rollout restart` uses:
-     changing anything in the pod template gives the Deployment a new
-     pod-template hash, which the built-in Deployment controller treats as
-     "roll a new ReplicaSet" — the existing `maxUnavailable`/readiness-probe
-     safety on the target Deployment governs the rollout, entirely for
-     free, without reimplementing any rollout logic.
-
-  The second pattern worth being able to whiteboard: **`SetupWithManager`
-  declares one primary watch (`ReloadTrigger`) and two secondary watches
-  (`ConfigMap`, `Secret`)**. The secondary watches don't reconcile
-  ConfigMaps/Secrets directly — `handler.EnqueueRequestsFromMapFunc(r.mapToTriggers)`
-  runs on every ConfigMap/Secret event cluster-wide, and `mapToTriggers`
-  translates "this ConfigMap changed" into "here are the `ReloadTrigger`
-  object(s) that reference it" by namespace-scoped listing and filtering.
-  This is the actual mechanism behind "watch a resource for changes" in
-  controller-runtime, and it's the single most reusable pattern in this
-  codebase — the same shape backs things like "restart a Deployment when
-  its ServiceAccount's token Secret rotates" or "reconcile an Ingress when
-  the Certificate it references changes."
-
-  RBAC markers (`+kubebuilder:rbac:...` comments directly above
-  `Reconcile`) are the actual source of truth for `config/rbac/role.yaml` —
-  `controller-gen rbac` compiles them into the generated `ClusterRole`.
-  There's no second place permissions are declared; get a verb wrong in the
-  comment and the generated role is wrong.
-
-- **`reloadtrigger_controller_test.go`** — fake-client (in-memory, no real
-  API server) tests covering all three `Reconcile` branches plus two
-  not-found failure modes plus the `mapToTriggers` mapping logic directly.
-  Deliberately **not** using `envtest` (a real `kube-apiserver`+`etcd`) —
-  a scope decision made explicit in the design spec to protect the
-  one-day time budget; the trade-off is not exercising real admission/RBAC
-  enforcement.
-
-### `main.go` / `logging.go` — the manager entrypoint
-
-Wires everything above into a running process: builds a `runtime.Scheme`
-(registers both the built-in Kinds this controller touches and the one
-custom `ReloadTrigger` Kind), constructs a `ctrl.Manager` (the object
-owning the shared informer cache and controller lifecycle), registers
-`/healthz`/`/readyz` HTTP checks (which the Deployment's own liveness/
-readiness probes call), and starts the reconciler. `LeaderElection: false`
-is deliberate, not an oversight — the manager runs a single replica, so
-there's no second instance to coordinate leadership with.
-
-### `Dockerfile`
-
-Multi-stage: a full Go toolchain image builds a static binary
-(`CGO_ENABLED=0`), then a `distroless/static:nonroot` image runs it —
-no shell, no package manager, smallest reasonable attack surface. The
-`go.mod`/`go.sum`-before-source-copy ordering is a deliberate Docker
-layer-cache trick: dependency downloads are cached across rebuilds as long
-as `go.mod`/`go.sum` themselves don't change.
-
-### `config/` — the Kustomize deployment manifests
-
-Four bases combined by `config/default/kustomization.yaml`:
-- `config/crd/` — the generated `ReloadTrigger` CRD (teaches the API
-  server the Kind exists at all).
-- `config/rbac/` — the generated `ClusterRole`, its `ClusterRoleBinding`,
-  and the controller's `ServiceAccount`.
-- `config/manager/` — the controller's own `Deployment`.
-- `config/default/` — the root: sets a shared `namespace:` and
-  `namePrefix:` that Kustomize applies to everything pulled in above,
-  including fixing up cross-references automatically (a `ClusterRoleBinding`'s
-  `subjects[0].name` gets renamed in lockstep with the `ServiceAccount` it
-  points at).
-
-`apps/applications/config-reloader.yaml` points ArgoCD directly at
-`config/default` — the same "point ArgoCD at a Kustomize dir" move already
-used for `vjencanja-backend`, just aimed at Kubebuilder's own generated
-output instead of hand-written manifests.
-
-### `apps/vjencanja-backend/reload-trigger.yaml`
-
-The one `ReloadTrigger` instance actually in use: watches
-`vjencanja-backend-secret` (the only credential-bearing resource that
-Deployment consumes today — there's no ConfigMap in this repo) and targets
-the `vjencanja-backend` Deployment, both in namespace `default` (this repo
-doesn't give either app its own namespace).
-
-### `.github/workflows/config-reloader.yml`
-
-Tests, then builds and pushes `ghcr.io/fr1k1/config-reloader` on push to
-`master`. Deliberately simpler than `vjencanja`'s CI (no `verify-deploy`
-job) — that job exists there to close an *asynchronous* gap across two
-separate GitHub repos with no shared credentials; this pipeline has neither
-problem, and rolling out a new image here is a manual tag bump, not a
-zero-touch redeploy, so there's no async chain to verify.
+- **No classes.** `type ReloadTriggerReconciler struct { ... }` is just a
+  data container. Behavior gets attached separately via **methods with a
+  receiver**: `func (r *ReloadTriggerReconciler) Reconcile(...)` reads as
+  "Reconcile is a method on `*ReloadTriggerReconciler`; call it `r.Reconcile(...)`."
+- **Pointers are explicit and common.** `*T` is "pointer to T," `&x` takes
+  the address of `x`. A pointer receiver (`func (r *Foo) Method()`) means
+  the method can mutate the actual struct, not a copy — used everywhere
+  here because reconcilers and their embedded client need to stay the same
+  instance across calls. `*metav1.Time` (a pointer, not a plain value) is
+  also how this codebase represents "optional" — `nil` means "never set,"
+  a normal `Time` value can't represent "absent."
+- **No exceptions.** Every fallible call returns two things:
+  `value, err := someCall()`. The universal idiom is
+  `if err != nil { return err }` (or wrapped with context:
+  `fmt.Errorf("fetching secret %s: %w", name, err)`). This is the single
+  biggest "feels different" thing coming from Python/JS try/catch — errors
+  are just regular return values you're expected to check every time, not
+  a control-flow jump.
+- **Interfaces are satisfied implicitly** — there's no `implements`
+  keyword. Any struct with the right methods automatically satisfies an
+  interface. `ReloadTriggerReconciler` embeds `client.Client` (a field with
+  no name, just the type) — that's Go's version of "has-a, but call its
+  methods like they're your own": `r.Get(...)`, `r.Update(...)`,
+  `r.Status()` all come from the embedded client, not code written in this
+  project.
+- **Zero values are meaningful.** An unset `string` is `""`, not `null`/
+  `undefined` — that's exactly why `trigger.Status.ObservedHash == ""` is
+  the real check for "has this ReloadTrigger ever reconciled before."
+- **`:=`** declares and assigns in one step (type inferred); `var x Type`
+  declares explicitly. Both appear throughout.
+- **Slices** (`[]T`, resizable) and **maps** (`map[K]V`) are the two
+  collection types you'll see — `[]WatchedResource`, `map[string][]byte`.
+- **Tests are just functions**: `func TestSomething(t *testing.T)`,
+  `t.Fatalf(...)` fails and stops that test. Run with `go test ./...`. No
+  separate test framework/assertion library — this codebase deliberately
+  uses none.
 
 ---
 
-## How to test, end to end
+## The big idea: an operator is a loop you write yourself
 
-**Locally, right now — no cluster needed:**
+You already trust a control loop you never had to write: a Deployment's
+built-in controller constantly compares its `spec` to reality and
+reconciles ReplicaSets/Pods to match. This project is you writing that
+exact same kind of loop, for a `Kind` you invented.
+
+| Something you already know | Its operator equivalent | Where |
+|---|---|---|
+| Deployment's controller reconciles Pods to match `spec` | `ReloadTriggerReconciler.Reconcile` does the same for `ReloadTrigger` | `controllers/reloadtrigger_controller.go` |
+| ArgoCD diffs desired (git) vs. actual (cluster) and corrects drift | `Reconcile` diffs a freshly computed hash (actual) against `status.observedHash` (last known) and corrects drift | same file |
+| Helm charts (e.g. `kube-prometheus-stack`) ship CRDs you never hand-wrote | `controller-gen` generates *this* CRD's YAML from Go struct + comment markers — same idea, different generator | `api/v1alpha1/reloadtrigger_types.go` → `config/crd/bases/*.yaml` |
+| RBAC `Role`/`RoleBinding` objects you'd otherwise hand-write | Generated from `+kubebuilder:rbac` comments directly above `Reconcile` — one source of truth, not two | `config/rbac/role.yaml` |
+| A Deployment only reacts to changes on itself | This controller *also* reacts to changes on other objects (ConfigMap/Secret) — a "secondary watch," mapped back to the right `ReloadTrigger` | `mapToTriggers`, same file |
+
+**Custom Resource Definition (CRD), plainly:** Kubernetes ships with
+built-in Kinds (`Deployment`, `Secret`, ...). A CRD teaches the API server
+one more Kind that *you* define — here, `ReloadTrigger`, with whatever
+fields you want (`spec.targetDeployment`, `spec.watch`). Once the CRD is
+applied, `kind: ReloadTrigger` YAML works exactly like any built-in
+object: `kubectl get/apply/describe` all just work.
+
+**Reconcile loop, plainly:** a function that gets called whenever the
+object it manages — or something it's watching — changes. Every call, it
+re-derives everything from *current real state*, never from "what just
+changed." That's what makes it safe to call redundantly, and it's the
+actual pattern interviewers mean by "write a controller."
+
+---
+
+## The one flow to have memorized
+
+Every `Reconcile` call is exactly one of three branches:
+
+1. **No hash recorded yet** → this is the first reconcile since the
+   `ReloadTrigger` was created. Record a baseline hash. **Don't restart** —
+   opting a healthy Deployment in must not itself cause a restart.
+2. **Hash unchanged** → true no-op. Nothing to do. This is what makes the
+   loop safe to run any number of times.
+3. **Hash changed** → patch the target Deployment's *pod template*
+   annotations (not the Deployment's own top-level ones) with a new hash +
+   timestamp. That's the exact trick `kubectl rollout restart` uses —
+   Kubernetes sees the pod template changed and rolls a new ReplicaSet,
+   governed by whatever rollout strategy that Deployment already has.
+
+And separately: **how a Secret/ConfigMap change even reaches this loop** —
+the controller also watches `ConfigMap`/`Secret` directly (a "secondary
+watch"). On any such change, `mapToTriggers` lists every `ReloadTrigger` in
+that namespace and finds the ones referencing the changed object by
+kind+name, then enqueues a `Reconcile` call for each match.
+
+---
+
+## Where to look in the code
+
+Every file already has thorough inline comments explaining the *why* — use
+this table to navigate, not to avoid opening the files.
+
+| File | What it is | Read if... |
+|---|---|---|
+| `controllers/reloadtrigger_controller.go` | The reconcile loop itself | You only read one file, read this |
+| `controllers/hash.go` | Turns ConfigMap/Secret content into one deterministic hash | You want the "how do we detect drift" answer |
+| `api/v1alpha1/reloadtrigger_types.go` | The CRD's Go types — `spec`/`status`, validation markers | You want to explain the CRD design |
+| `main.go` | Wires the manager, scheme, and reconciler together, starts the process | You want the "how does this actually run" answer |
+| `config/crd/`, `config/rbac/`, `config/manager/` | Generated + hand-written Kubernetes manifests that deploy the above | You want to explain how it gets into the cluster |
+| `*_test.go` files | Fake-client tests, no real cluster needed | You want to explain how you tested it |
+
+---
+
+## How to prove it works
+
 ```
 cd operators/config-reloader
-go build ./...
-go vet ./...
-go test ./... -v
-```
-All 12 tests should pass (1 deepcopy test, 5 hash tests, 6 reconciler/
-mapping tests). This is the fake-client layer — fast, deterministic, no
-external dependencies.
-
-**Rendering the manifests without a cluster** (useful to sanity-check
-Kustomize composition before anything touches git):
-```
-kubectl kustomize operators/config-reloader/config/default
-kubectl kustomize apps/vjencanja-backend
+go test ./...                                    # 12 tests, no cluster needed
+kubectl kustomize config/default                  # renders the full manifest set
 ```
 
-**After you push** (nothing reaches the cluster before this — ArgoCD is
-this repo's only deploy path):
-1. Watch `homelab` and the new `config-reloader` Application sync in the
-   ArgoCD UI. A transient error on `apps/vjencanja-backend`'s
-   `ReloadTrigger` — if it syncs before the CRD lands — is expected and
-   should self-heal on the next auto-sync pass.
-2. `kubectl get reloadtriggers -A` — `vjencanja-backend-config` should show
-   `READY=True`, `REASON=Initialized`, no `LAST RELOAD` yet (first
-   reconcile is baseline-only, by design).
-3. `kubectl logs -n config-reloader-system deploy/config-reloader-controller-manager`
-   — confirm the manager started and `/healthz`/`/readyz` are responding
-   (pod should show `Ready`).
-4. **The real end-to-end proof:** rotate one key in
-   `vjencanja-backend-secret` (reseal and push, following this repo's
-   existing sealed-secrets workflow in the README). Then confirm:
-   - `kubectl get reloadtriggers` shows `REASON=Reloaded` and a real
-     `LAST RELOAD` timestamp.
-   - `kubectl get pods -l app=vjencanja-backend` shows a new pod (check its
-     `AGE`).
-   - `kubectl get events --field-selector reason=ConfigReloaded` shows the
-     recorded Event.
-   - The vjencanja-backend API stayed up throughout — same
-     `maxUnavailable: 0` zero-downtime guarantee `CICD.md` documents for
-     image rollouts applies here too, since this triggers the exact same
-     rolling-update mechanism, just from a different trigger.
+Live, once deployed: `kubectl get reloadtriggers -A` (status at a glance),
+`kubectl describe deployment vjencanja-backend` (see the restart
+annotations after a real change), `kubectl get events --field-selector reason=ConfigReloaded`.
 
 ---
 
-## Anticipated questions
+## Interview cheat sheet
 
 **"Walk me through what happens when a Secret changes."**
-The Secret update event fires on the controller's secondary watch. That
-event goes through `mapToTriggers`, which lists every `ReloadTrigger` in
-the Secret's namespace and finds the ones whose `spec.watch` names that
-Secret — here, `vjencanja-backend-config`. That produces a
-`Reconcile` request for that one object. `Reconcile` re-fetches the
-Secret's *current* content (not the content from the event — the event is
-only a trigger, never a payload), hashes it, sees it differs from
-`status.observedHash`, and patches `vjencanja-backend`'s pod template with
-a new hash + timestamp annotation. The built-in Deployment controller sees
-the pod template changed and rolls a new ReplicaSet, governed by the
-Deployment's own existing rollout strategy.
+Secondary watch fires → `mapToTriggers` finds the `ReloadTrigger`(s)
+referencing it → `Reconcile` runs, re-fetches the Secret's *current*
+content (never trusts the event payload), hashes it, sees it differs from
+`status.observedHash`, patches the target Deployment's pod template →
+built-in Deployment controller rolls a new ReplicaSet under its own
+existing strategy.
 
-**"Why not just restart the Deployment directly (e.g. delete its pods)?"**
-Patching the pod template and letting the Deployment controller do the
-rollout means this operator inherits the target's own
-`maxUnavailable`/`maxSurge`/readiness-probe configuration for free. Deleting
-pods directly would bypass all of that and risk a moment with zero healthy
-replicas — the same zero-downtime guarantee the rest of this repo already
-depends on for image rollouts.
+**"Why hash the content instead of comparing `resourceVersion`?"**
+`resourceVersion` changes on *any* write (labels, internal bookkeeping),
+not just content — using it would cause restarts unrelated to real drift.
 
-**"Why compute a hash instead of just comparing resourceVersion?"**
-`resourceVersion` changes on *any* write, including ones that don't change
-`data` (e.g. metadata/label edits, or the API server's own internal
-bookkeeping) — using it would cause spurious restarts unrelated to actual
-content drift. Hashing `.data`/`.binaryData` directly means only real
-content changes matter.
+**"Why patch the pod template instead of just deleting pods?"**
+Patching inherits the Deployment's own `maxUnavailable`/readiness-probe
+safety for free. Deleting pods directly bypasses all of that.
+
+**"Why a CRD instead of an annotation on the Deployment?"** (the real
+design pivot on this project) — an annotation demonstrates nothing about
+custom resources, which the job spec explicitly names. A CRD gives a real,
+demoable artifact (`kubectl get reloadtriggers`) and is a genuine
+spec/status split, not decoration — full reasoning in the design spec.
+
+**"What would you do differently at scale?"** `mapToTriggers` does a full
+namespace List + filter on every event — fine at homelab scale, would
+become a field index (`client.IndexField`) at real scale. No `envtest`
+coverage (fake-client only), no StatefulSet/DaemonSet support, no
+cross-namespace watch targets — all explicit one-day scope cuts, not
+oversights.
 
 **"What's the actual difference between this and just installing
-Reloader?"** None, functionally, for this narrow use case — Reloader is
-more mature, supports more workload types (StatefulSet, DaemonSet), and has
-an "auto-detect from pod spec" mode this project doesn't. The point of
-building it wasn't to out-engineer Reloader; it was to have a codebase
-small enough to fully understand and defend line-by-line, which is a
-different (and for an interview, more valuable) goal than "solve the
-problem the fastest way."
+Reloader (the existing OSS tool)?"** Functionally, for this narrow case:
+nothing — Reloader is more mature and does more. The point wasn't to
+out-engineer it; it was to build something small enough to defend
+line-by-line, which is the more valuable thing to have in an interview.
 
-**"What would you do differently at scale, or with more time?"**
-- `mapToTriggers` does a full namespace-scoped `List` + in-memory filter on
-  every ConfigMap/Secret event. Fine at homelab scale; at real scale, a
-  `client.IndexField` on the watched-resource name would make this an
-  indexed lookup instead.
-- No `envtest` coverage — fake-client tests don't exercise real RBAC
-  enforcement or admission validation. Worth adding if this graduated
-  beyond a portfolio project.
-- No support for StatefulSet/DaemonSet targets, and no cross-namespace
-  watch targets — both narrow scope decisions made explicitly to fit a
-  one-day build, not fundamental limitations of the design.
-- `getreeba` has no `ReloadTrigger` yet — the pattern is proven on one
-  service and ready to copy, not applied repo-wide speculatively (mirrors
-  the same "prove it on one service first" judgment call already made for
-  Image Updater, per `CICD.md`).
+---
+
+## Questions I asked while learning this (running log)
+
+Every question asked about this project during the build gets logged here.
+
+### Why do we need `go.mod` and `go.sum`, and how are they created?
+
+`go.mod` declares the module's identity, Go version, and every
+dependency pinned to one exact version — Go's dependency resolution reads
+it to decide precisely what to compile against. `go.sum` is a
+cryptographic hash of every dependency's actual downloaded content,
+re-verified on every build, so a compromised proxy can't silently swap in
+different code.
+
+Created via `go mod init config-reloader`, then populated by `go get
+<pkg>@<version>`. **A real mistake worth retelling:** I ran `go mod tidy`
+once before any `.go` files existed — with zero imports anywhere yet, it
+decided every pinned dependency was "unused" and stripped them all out.
+The next build failed; a second `tidy` (now with real imports) re-resolved
+onto the *latest* versions instead of my original pins, since the pin
+info was already gone. Fixed by explicitly re-running `go get` with the
+intended versions once source files existed. Lesson: `tidy` only reflects
+what your code *currently* imports — run it too early and it can't tell
+"not yet used" from "unused."
+
+### Does the controller's GHCR image need an `imagePullSecret`? Can it stay public?
+
+No, and public is the right call. A pull secret only matters for a
+*private* image; this one is just the compiled controller binary, nothing
+sensitive. That's a deliberate, explainable difference from
+`vjencanja-backend`/`getreeba`, which legitimately are private (real
+application code) and do need `ghcr-secret`.
+
+I initially flagged this as a bug — GHCR packages default to private on
+first push, and the existing `ghcr-secret` is sealed into namespace
+`default` only, so it wouldn't even be visible from `config-reloader-system`
+if reused. Both facts are true in general; the package just turned out to
+already be public, so there was nothing to fix. Checked the real GitHub
+package settings to confirm rather than guessing either way.

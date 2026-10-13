@@ -1,0 +1,60 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-alloy
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: alloy
+    targetRevision: 1.13.1
+    helm:
+      releaseName: alloy
+      valuesObject:
+        crds:
+          create: false
+        controller:
+          type: deployment
+          replicas: 1
+        rbac:
+          create: true
+          namespaces:
+            - monitoring-v2
+            - kube-system
+          rules:
+            - apiGroups: [""]
+              resources: ["pods"]
+              verbs: ["get", "list", "watch"]
+          clusterRules: []
+        alloy:
+          configMap:
+            create: false
+            name: alloy-config
+            key: config.alloy
+          enableReporting: false
+          envFrom:
+            - secretRef:
+                name: grafana-cloud-metrics
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+        configReloader:
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring-v2
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

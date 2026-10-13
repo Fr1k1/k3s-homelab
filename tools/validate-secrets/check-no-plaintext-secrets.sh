@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CI guardrail: fails if a plaintext Kubernetes Secret (not SealedSecret) or a
-# tracked .env file ever lands under apps/. Holds no secret material itself --
+# tracked .env file ever lands under apps/ or monitoring/. Holds no secret material itself --
 # it only greps for shapes that shouldn't be committed.
 set -euo pipefail
 
@@ -9,9 +9,9 @@ cd "$REPO_ROOT"
 
 status=0
 
-plaintext_secrets=$(grep -rlE '^kind: Secret$' apps/ --include='*.yaml' --include='*.yml' 2>/dev/null || true)
+plaintext_secrets=$(grep -rlE '^kind: Secret$' apps/ monitoring/ --include='*.yaml' --include='*.yml' 2>/dev/null || true)
 if [ -n "$plaintext_secrets" ]; then
-  echo "::error::Plaintext Kubernetes Secret(s) found under apps/ -- these must be SealedSecrets:"
+  echo "::error::Plaintext Kubernetes Secret(s) found under apps/ or monitoring/ -- these must be SealedSecrets:"
   echo "$plaintext_secrets"
   status=1
 fi

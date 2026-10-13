@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-kube-state-metrics
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-state-metrics
+    targetRevision: 8.6.0
+    helm:
+      releaseName: kube-state-metrics
+      valuesObject:
+        collectors:
+          - pods
+          - deployments
+        metricAllowlist:
+          - kube_pod_container_status_restarts_total
+          - kube_pod_container_status_last_terminated_reason
+          - kube_deployment_status_replicas_available
+          - kube_deployment_spec_replicas
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 96Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring-v2
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
