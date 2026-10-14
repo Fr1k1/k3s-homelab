@@ -1,0 +1,1130 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: vjencanja-critical
+    folder: vjencanja/alert-rules.yaml
+    interval: 1m
+    rules:
+      - uid: 86bca15a-2135-57ab-a35f-4b026aa67a91
+        title: ApiDown
+        condition: threshold
+        data:
+          - refId: query
+            queryType: prometheus
+            relativeTimeRange:
+              from: 660
+              to: 60
+            datasourceUid: grafanacloud-prom
+            model:
+              datasource:
+                type: prometheus
+                uid: grafanacloud-prom
+              expr: max by (job) (probe_http_status_code{job="vjencanja-api"} == bool 200) == 0
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: query
+          - refId: prometheus_math
+            queryType: math
+            datasourceUid: __expr__
+            model:
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: is_number($query) || is_nan($query) || is_inf($query)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: prometheus_math
+              type: math
+          - refId: threshold
+            queryType: threshold
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: prometheus_math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: threshold
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: api.vjenchanje.com returned no 200 from any probe
+        labels:
+          __converted_prometheus_rule__: "true"
+          severity: critical
+        isPaused: false
+        missing_series_evals_to_resolve: 1
+      - uid: 0692ee8d-0e77-562c-9605-515f24c6fde7
+        title: NodeMetricsGone
+        condition: threshold
+        data:
+          - refId: query
+            queryType: prometheus
+            relativeTimeRange:
+              from: 660
+              to: 60
+            datasourceUid: grafanacloud-prom
+            model:
+              datasource:
+                type: prometheus
+                uid: grafanacloud-prom
+              expr: absent_over_time(up{job="node-exporter"}[5m])
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: query
+          - refId: prometheus_math
+            queryType: math
+            datasourceUid: __expr__
+            model:
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: is_number($query) || is_nan($query) || is_inf($query)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: prometheus_math
+              type: math
+          - refId: threshold
+            queryType: threshold
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: prometheus_math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: threshold
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: "No node-exporter data for 5 minutes: node, k3s or Alloy is down"
+        labels:
+          __converted_prometheus_rule__: "true"
+          severity: critical
+        isPaused: false
+        missing_series_evals_to_resolve: 1
+      - uid: 4275aacd-9cb1-50ad-8aa5-1877de242d29
+        title: Backend5xxErrors
+        condition: threshold
+        data:
+          - refId: query
+            queryType: prometheus
+            relativeTimeRange:
+              from: 660
+              to: 60
+            datasourceUid: grafanacloud-prom
+            model:
+              datasource:
+                type: prometheus
+                uid: grafanacloud-prom
+              expr: |
+                sum(clamp_min(
+                  traefik_service_requests_total{service=~"default-vjencanja-backend-.*", code=~"5.."}
+                  - (traefik_service_requests_total{service=~"default-vjencanja-backend-.*", code=~"5.."} offset 5m
+                     or traefik_service_requests_total{service=~"default-vjencanja-backend-.*", code=~"5.."} * 0),
+                  0)) >= 5
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: query
+          - refId: prometheus_math
+            queryType: math
+            datasourceUid: __expr__
+            model:
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: is_number($query) || is_nan($query) || is_inf($query)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: prometheus_math
+              type: math
+          - refId: threshold
+            queryType: threshold
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: prometheus_math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: threshold
+              type: threshold
+        noDataState: OK
+        execErrState: KeepLast
+        annotations:
+          summary: vjencanja-backend served {{ $value | humanize }} 5xx responses in the last 5 minutes
+        labels:
+          __converted_prometheus_rule__: "true"
+          severity: critical
+        isPaused: false
+        missing_series_evals_to_resolve: 1
+      - uid: 8cc45ef6-0c73-55ff-a33f-db831c0df8f0
+        title: CorsBroken
+        condition: threshold
+        data:
+          - refId: query
+            queryType: prometheus
+            relativeTimeRange:
+              from: 660
+              to: 60
+            datasourceUid: grafanacloud-prom
+            model:
+              datasource:
+                type: prometheus
+                uid: grafanacloud-prom
+              expr: max by (job) (probe_success{job="vjencanja-api"}) == 0 and on (job) min by (job) (probe_http_status_code{job="vjencanja-api"}) == 200
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: query
+          - refId: prometheus_math
+            queryType: math
+            datasourceUid: __expr__
+            model:
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: is_number($query) || is_nan($query) || is_inf($query)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: prometheus_math
+              type: math
+          - refId: threshold
+            queryType: threshold
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: prometheus_math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: threshold
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: api.vjenchanje.com answers 200 but Access-Control-Allow-Origin does not match https://app.vjenchanje.com
+        labels:
+          __converted_prometheus_rule__: "true"
+          severity: critical
+        isPaused: false
+        missing_series_evals_to_resolve: 1
+      - uid: c3e4bbd3-b3c9-59b3-8891-a4078aa39a42
+        title: BackendUnavailable
+        condition: threshold
+        data:
+          - refId: query
+            queryType: prometheus
+            relativeTimeRange:
+              from: 660
+              to: 60
+            datasourceUid: grafanacloud-prom
+            model:
+              datasource:
+                type: prometheus
+                uid: grafanacloud-prom
+              expr: kube_deployment_status_replicas_available{namespace="default", deployment="vjencanja-backend"} < 1
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: query
+          - refId: prometheus_math
+            queryType: math
+            datasourceUid: __expr__
+            model:
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: is_number($query) || is_nan($query) || is_inf($query)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: prometheus_math
+              type: math
+          - refId: threshold
+            queryType: threshold
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: prometheus_math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: threshold
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: vjencanja-backend has no available replicas
+        labels:
+          __converted_prometheus_rule__: "true"
+          severity: critical
+        isPaused: false
+        missing_series_evals_to_resolve: 1
+      - uid: 40496914-180f-54cb-8dfe-1fdb99bc7433
+        title: ContainerOOMKilled
+        condition: threshold
+        data:
+          - refId: query
+            queryType: prometheus
+            relativeTimeRange:
+              from: 660
+              to: 60
+            datasourceUid: grafanacloud-prom
+            model:
+              datasource:
+                type: prometheus
+                uid: grafanacloud-prom
+              expr: (increase(kube_pod_container_status_restarts_total[10m]) > 0) and on (namespace, pod, container) (kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: query
+          - refId: prometheus_math
+            queryType: math
+            datasourceUid: __expr__
+            model:
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: is_number($query) || is_nan($query) || is_inf($query)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: prometheus_math
+              type: math
+          - refId: threshold
+            queryType: threshold
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: prometheus_math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: threshold
+              type: threshold
+        noDataState: OK
+        execErrState: KeepLast
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }} container {{ $labels.container }} was OOMKilled"
+        labels:
+          __converted_prometheus_rule__: "true"
+          severity: critical
+        isPaused: false
+        missing_series_evals_to_resolve: 1
+  - orgId: 1
+    name: vjencanja-warning
+    folder: vjencanja/alert-rules.yaml
+    interval: 1m
+    rules:
+      - uid: 2e027fac-fde6-5a39-817a-44a63f6c54e0
+        title: NodeMemoryHigh
+        condition: threshold
+        data:
+          - refId: query
+            queryType: prometheus
+            relativeTimeRange:
+              from: 660
+              to: 60
+            datasourceUid: grafanacloud-prom
+            model:
+              datasource:
+                type: prometheus
+                uid: grafanacloud-prom
+              expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 90
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: query
+          - refId: prometheus_math
+            queryType: math
+            datasourceUid: __expr__
+            model:
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: is_number($query) || is_nan($query) || is_inf($query)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: prometheus_math
+              type: math
+          - refId: threshold
+            queryType: threshold
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: prometheus_math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: threshold
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: Node memory usage is {{ $value | printf "%.0f" }}%
+        labels:
+          __converted_prometheus_rule__: "true"
+          severity: warning
+        isPaused: false
+        missing_series_evals_to_resolve: 1
+      - uid: 48632e03-7371-557b-9945-e328a892c023
+        title: NodeDiskFilling
+        condition: threshold
+        data:
+          - refId: query
+            queryType: prometheus
+            relativeTimeRange:
+              from: 660
+              to: 60
+            datasourceUid: grafanacloud-prom
+            model:
+              datasource:
+                type: prometheus
+                uid: grafanacloud-prom
+              expr: (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 > 85
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: query
+          - refId: prometheus_math
+            queryType: math
+            datasourceUid: __expr__
+            model:
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: is_number($query) || is_nan($query) || is_inf($query)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: prometheus_math
+              type: math
+          - refId: threshold
+            queryType: threshold
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: prometheus_math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: threshold
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: Root filesystem is {{ $value | printf "%.0f" }}% full
+        labels:
+          __converted_prometheus_rule__: "true"
+          severity: warning
+        isPaused: false
+        missing_series_evals_to_resolve: 1
+      - uid: 3bc55a71-a3bc-59cb-8c4e-6d95094df3f1
+        title: PodCrashLooping
+        condition: threshold
+        data:
+          - refId: query
+            queryType: prometheus
+            relativeTimeRange:
+              from: 660
+              to: 60
+            datasourceUid: grafanacloud-prom
+            model:
+              datasource:
+                type: prometheus
+                uid: grafanacloud-prom
+              expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: query
+          - refId: prometheus_math
+            queryType: math
+            datasourceUid: __expr__
+            model:
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: is_number($query) || is_nan($query) || is_inf($query)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: prometheus_math
+              type: math
+          - refId: threshold
+            queryType: threshold
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: prometheus_math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: threshold
+              type: threshold
+        noDataState: OK
+        execErrState: KeepLast
+        annotations:
+          summary: '{{ $labels.namespace }}/{{ $labels.pod }} restarted {{ $value | printf "%.0f" }} times in 15 minutes'
+        labels:
+          __converted_prometheus_rule__: "true"
+          severity: warning
+        isPaused: false
+        missing_series_evals_to_resolve: 1
+      - uid: 3bb79a5f-c3e1-54e5-bc9f-e264e17e59bc
+        title: NodeCpuSaturated
+        condition: threshold
+        data:
+          - refId: query
+            queryType: prometheus
+            relativeTimeRange:
+              from: 660
+              to: 60
+            datasourceUid: grafanacloud-prom
+            model:
+              datasource:
+                type: prometheus
+                uid: grafanacloud-prom
+              expr: (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100 > 90
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: query
+          - refId: prometheus_math
+            queryType: math
+            datasourceUid: __expr__
+            model:
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: is_number($query) || is_nan($query) || is_inf($query)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: prometheus_math
+              type: math
+          - refId: threshold
+            queryType: threshold
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: prometheus_math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: threshold
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        annotations:
+          summary: Node CPU usage is {{ $value | printf "%.0f" }}%
+        labels:
+          __converted_prometheus_rule__: "true"
+          severity: warning
+        isPaused: false
+        missing_series_evals_to_resolve: 1
+      - uid: 573d2d5e-8115-5a97-948d-229f4a3b28e3
+        title: ApiSlow
+        condition: threshold
+        data:
+          - refId: query
+            queryType: prometheus
+            relativeTimeRange:
+              from: 660
+              to: 60
+            datasourceUid: grafanacloud-prom
+            model:
+              datasource:
+                type: prometheus
+                uid: grafanacloud-prom
+              expr: avg by (job) (probe_duration_seconds{job="vjencanja-api"}) > 2
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: query
+          - refId: prometheus_math
+            queryType: math
+            datasourceUid: __expr__
+            model:
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: is_number($query) || is_nan($query) || is_inf($query)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: prometheus_math
+              type: math
+          - refId: threshold
+            queryType: threshold
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: prometheus_math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: threshold
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 3m
+        annotations:
+          summary: api.vjenchanje.com takes {{ $value | printf "%.1f" }}s to answer
+        labels:
+          __converted_prometheus_rule__: "true"
+          severity: warning
+        isPaused: false
+        missing_series_evals_to_resolve: 1
+      - uid: 3fbf773f-b5a2-5c47-be2b-fe0cf0da48df
+        title: TlsCertExpiring
+        condition: threshold
+        data:
+          - refId: query
+            queryType: prometheus
+            relativeTimeRange:
+              from: 660
+              to: 60
+            datasourceUid: grafanacloud-prom
+            model:
+              datasource:
+                type: prometheus
+                uid: grafanacloud-prom
+              expr: min by (job) (probe_ssl_earliest_cert_expiry{job="vjencanja-api"}) - time() < 14 * 86400
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: query
+          - refId: prometheus_math
+            queryType: math
+            datasourceUid: __expr__
+            model:
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: is_number($query) || is_nan($query) || is_inf($query)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: prometheus_math
+              type: math
+          - refId: threshold
+            queryType: threshold
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+              datasource:
+                IsPrunable: false
+                access: ""
+                apiVersion: ""
+                basicAuth: false
+                basicAuthUser: ""
+                created: "0001-01-01T00:00:00Z"
+                database: ""
+                id: -100
+                isDefault: false
+                jsonData: {}
+                name: __expr__
+                readOnly: false
+                secureJsonData: {}
+                type: __expr__
+                uid: __expr__
+                updated: "0001-01-01T00:00:00Z"
+                url: ""
+                user: ""
+                withCredentials: false
+              expression: prometheus_math
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: threshold
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: TLS certificate for api.vjenchanje.com expires in {{ $value | humanizeDuration }}
+        labels:
+          __converted_prometheus_rule__: "true"
+          severity: warning
+        isPaused: false
+        missing_series_evals_to_resolve: 1
