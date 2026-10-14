@@ -147,6 +147,13 @@ else
   fail "happy-path: argocd-secret was not restored before ArgoCD was installed (argosecret_line=$argosecret_line, argocd_install_line=$argocd_install_line)"
 fi
 
+# the ApplicationSet CRD exceeds the client-side apply annotation limit, so ArgoCD must be server-side applied
+if grep -q "kubectl apply --server-side --force-conflicts -n argocd -f .*argo-cd/v3.4.5/manifests/install.yaml" "$STUB_LOG"; then
+  pass
+else
+  fail "happy-path: ArgoCD was not installed with server-side apply, log: $(cat "$STUB_LOG")"
+fi
+
 # Image Updater is an ArgoCD Application (apps/applications/argocd-image-updater.yaml),
 # so bootstrap must NOT helm-install it too -- two owners of one release.
 if grep -q "helm install" "$STUB_LOG"; then

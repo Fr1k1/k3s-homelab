@@ -78,7 +78,7 @@ kubectl -n kube-system rollout status deployment/sealed-secrets-controller --tim
 echo "== 5/6: restoring argocd-secret, then installing ArgoCD =="
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f "$TMP_DIR/argocd-secret.json"
-kubectl apply -n argocd -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
+kubectl apply --server-side --force-conflicts -n argocd -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
 kubectl -n argocd rollout status deployment/argocd-server --timeout=180s
 
 echo "== 6/6: bootstrapping the homelab Application (also installs Image Updater) =="
