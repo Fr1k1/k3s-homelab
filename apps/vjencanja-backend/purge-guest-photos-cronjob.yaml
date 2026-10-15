@@ -1,0 +1,49 @@
+# Image is rewritten to the same digest as the Deployment by the kustomization's images: block.
+# Remove the --dry-run arg only after a manual dry run has been checked.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: purge-guest-photos
+  namespace: default
+spec:
+  schedule: "17 3 * * *"
+  timeZone: "Europe/Zagreb"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app: purge-guest-photos
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: ghcr-secret
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: purge
+              image: ghcr.io/fosleen/vjencanja-backend:latest
+              command: ["python", "-m", "app.jobs.purge_guest_photos"]
+              args: ["--dry-run"]
+              envFrom:
+                - secretRef:
+                    name: vjencanja-backend-secret
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 256Mi
