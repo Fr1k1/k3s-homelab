@@ -1,0 +1,16 @@
+# Fires PurgeJobFailed: a Job whose name matches the purge CronJob's runs and fails at once.
+# kubectl apply -f monitoring/test/purge-job-failed.yaml ; then kubectl -n default delete job purge-guest-photos-alerttest
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: purge-guest-photos-alerttest
+  namespace: default
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: fail
+          image: busybox:1.36
+          command: ["sh", "-c", "exit 1"]
