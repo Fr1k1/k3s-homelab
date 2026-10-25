@@ -1128,3 +1128,57 @@ groups:
           severity: warning
         isPaused: false
         missing_series_evals_to_resolve: 1
+  - orgId: 1
+    name: vjencanja-warning
+    folder: vjencanja
+    interval: 1m
+    rules:
+      - uid: fg2aaj5w52ozkf
+        title: purge-job-fail
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: grafanacloud-prom
+            model:
+              editorMode: code
+              expr: max by (namespace, job_name) (kube_job_failed{namespace="default", job_name=~"purge-guest-photos-.*", condition="true"}) == 1
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            queryType: expression
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: KeepLast
+        isPaused: false
+        notification_settings:
+          receiver: email-me
