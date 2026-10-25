@@ -1,5 +1,5 @@
 # Image is rewritten to the same digest as the Deployment by the kustomization's images: block.
-# Remove the --dry-run arg only after a manual dry run has been checked.
+# Runs for real. For a dry run, temporarily add args: ["--dry-run"] to the container.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -33,7 +33,6 @@ spec:
             - name: purge
               image: ghcr.io/fosleen/vjencanja-backend:latest
               command: ["python", "-m", "app.jobs.purge_guest_photos"]
-              args: ["--dry-run"]
               envFrom:
                 - secretRef:
                     name: vjencanja-backend-secret
