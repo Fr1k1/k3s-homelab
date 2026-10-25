@@ -96,7 +96,7 @@ prometheus.relabel "allowlist" {
 
 	rule {
 		source_labels = ["__name__"]
-		regex         = "up|node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|node_filesystem_avail_bytes|node_filesystem_size_bytes|node_cpu_seconds_total|node_vmstat_oom_kill|kube_pod_container_status_restarts_total|kube_pod_container_status_last_terminated_reason|kube_deployment_status_replicas_available|kube_deployment_spec_replicas|traefik_service_requests_total"
+		regex         = "up|node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|node_filesystem_avail_bytes|node_filesystem_size_bytes|node_cpu_seconds_total|node_vmstat_oom_kill|kube_pod_container_status_restarts_total|kube_pod_container_status_last_terminated_reason|kube_deployment_status_replicas_available|kube_deployment_spec_replicas|kube_job_failed|traefik_service_requests_total"
 		action        = "keep"
 	}
 

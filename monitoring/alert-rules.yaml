@@ -102,3 +102,10 @@ groups:
           severity: warning
         annotations:
           summary: "TLS certificate for api.vjenchanje.com expires in {{ $value | humanizeDuration }}"
+
+      - alert: PurgeJobFailed
+        expr: max by (namespace, job_name) (kube_job_failed{namespace="default", job_name=~"purge-guest-photos-.*", condition="true"}) == 1
+        labels:
+          severity: warning
+        annotations:
+          summary: "Guest photo purge {{ $labels.job_name }} failed. Read its logs, then delete the Job to resolve"

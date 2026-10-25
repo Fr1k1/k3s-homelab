@@ -325,3 +325,25 @@ tests:
               job: vjencanja-api
             exp_annotations:
               summary: "TLS certificate for api.vjenchanje.com expires in 9d 23h 45m 0s"
+
+  - name: PurgeJobFailed fires only for a failed nightly purge Job
+    interval: 1m
+    input_series:
+      - series: 'kube_job_failed{namespace="default", job_name="purge-guest-photos-29343677", condition="true"}'
+        values: '1x5'
+      - series: 'kube_job_failed{namespace="default", job_name="purge-guest-photos-29343677", condition="false"}'
+        values: '0x5'
+      - series: 'kube_job_failed{namespace="default", job_name="purge-guest-photos-29342237", condition="true"}'
+        values: '0x5'
+      - series: 'kube_job_failed{namespace="default", job_name="other-job", condition="true"}'
+        values: '1x5'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: PurgeJobFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: default
+              job_name: purge-guest-photos-29343677
+            exp_annotations:
+              summary: "Guest photo purge purge-guest-photos-29343677 failed. Read its logs, then delete the Job to resolve"
