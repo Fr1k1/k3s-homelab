@@ -9,4 +9,4 @@ resources:
   - purge-guest-photos-cronjob.yaml
 images:
   - name: ghcr.io/fosleen/vjencanja-backend
-    digest: sha256:e941e85553e93ae180e0ae02f26f17216d77412a2fd2ccb1423a9a8550cdf9ad
+    digest: sha256:c770416e80e8205cd0dea6e3e7c1043f131a2653d833e5d666ec288007cfce2b
